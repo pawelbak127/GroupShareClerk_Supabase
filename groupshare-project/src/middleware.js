@@ -1,7 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from 'next/server';
-import { getUserByAuthId } from './lib/supabase-client';
-import supabaseAdmin from './lib/supabase-admin-client';
 
 // Definicja ścieżek uwierzytelniania Clerk, które powinny być obsługiwane
 const clerkPublicRoutes = [
@@ -16,11 +14,11 @@ const clerkPublicRoutes = [
 const isPublicRoute = createRouteMatcher(clerkPublicRoutes);
 
 export default clerkMiddleware({
-  async afterAuth(auth, req, evt) {
+  afterAuth(auth, req, evt) {
     // Pobierz bieżącą ścieżkę z URL
     const path = req.nextUrl.pathname;
     
-    // Obsługa ścieżek Clerk - dodane by uniknąć 404
+    // Obsługa ścieżek Clerk
     if (path.includes('catchall_check') || 
         path.includes('sso-callback') || 
         isPublicRoute(path)) {
@@ -38,51 +36,6 @@ export default clerkMiddleware({
     // Jeśli ścieżka to API, pozwól na obsługę przez funkcje API
     if (path.startsWith('/api/')) {
       return NextResponse.next();
-    }
-    
-    // Jeśli użytkownik jest zalogowany, ale nie ma jeszcze profilu w Supabase
-    if (auth.userId) {
-      try {
-        // Sprawdź, czy użytkownik ma już profil w Supabase
-        const userProfile = await getUserByAuthId(auth.userId);
-        
-        // Jeśli nie ma profilu, a nie jest na ścieżce API do utworzenia profilu
-        if (!userProfile && !path.startsWith('/api/auth/profile')) {
-          console.log(`Tworzenie profilu dla użytkownika ${auth.userId} w middleware`);
-          
-          // Bezpośrednie utworzenie profilu przez supabaseAdmin
-          try {
-            // Pobierz dane uzytkownika z Clerk
-            const clerkUser = auth.user;
-            
-            // Utwórz profil uzytkownika bezpośrednio w Supabase
-            const { data: createdProfile, error: createError } = await supabaseAdmin
-              .from('user_profiles')
-              .insert([{
-                external_auth_id: auth.userId,
-                display_name: clerkUser?.firstName 
-                  ? `${clerkUser.firstName} ${clerkUser.lastName || ''}`.trim() 
-                  : (clerkUser?.username || 'Nowy użytkownik'),
-                email: clerkUser?.emailAddresses[0]?.emailAddress || '',
-                profile_type: 'both', // Domyślna wartość
-                verification_level: 'basic', // Domyślna wartość
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              }])
-              .select();
-            
-            if (createError) {
-              console.error('Błąd przy tworzeniu profilu w middleware:', createError);
-            } else {
-              console.log('Profil użytkownika utworzony pomyślnie:', createdProfile);
-            }
-          } catch (profileError) {
-            console.error('Wyjątek przy tworzeniu profilu użytkownika:', profileError);
-          }
-        }
-      } catch (error) {
-        console.error('Error syncing user profile in middleware:', error);
-      }
     }
     
     // Kontynuuj standardowe przetwarzanie

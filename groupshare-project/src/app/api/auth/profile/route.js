@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import { getUserByAuthId } from '../../../../lib/supabase-client';
-import supabaseAdmin from '../../../../lib/supabase-admin-client';
+import { getSupabaseClient } from '../../../../lib/supabase-client'
 
 /**
  * GET /api/auth/profile
- * Pobiera profil obecnie zalogowanego użytkownika, lub tworzy go jeśli nie istnieje
+ * Pobiera profil obecnie zalogowanego użytkownika lub zwraca dane Clerk bez synchronizacji
  */
 export async function GET() {
   try {
@@ -19,52 +18,36 @@ export async function GET() {
       );
     }
     
-    console.log("Użytkownik Clerk:", user.id);
+    // Pobierz token Supabase z sesji Clerk
+    const supabaseToken = await user.getToken({ template: 'supabase' });
     
-    // Sprawdź, czy użytkownik ma profil w bazie danych
-    const userProfile = await getUserByAuthId(user.id);
+    // Utwórz klienta Supabase z tokenem sesji
+    const supabase = getSupabaseClient(supabaseToken);
     
-    // Jeśli profil istnieje, zwróć go
-    if (userProfile) {
-      console.log("Znaleziono istniejący profil:", userProfile.id);
-      return NextResponse.json(userProfile);
-    }
-    
-    // W przeciwnym razie utwórz nowy profil
-    const newProfile = {
-      external_auth_id: user.id,
-      display_name: user.firstName 
-        ? `${user.firstName} ${user.lastName || ''}`.trim() 
-        : (user.username || 'Nowy użytkownik'),
-      email: user.emailAddresses[0]?.emailAddress || '',
-      phone_number: user.phoneNumbers[0]?.phoneNumber || null,
-      profile_type: 'both', // Domyślna wartość
-      verification_level: 'basic', // Domyślna wartość
-      bio: '',
-      avatar_url: user.imageUrl || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    
-    console.log("Tworzenie nowego profilu dla użytkownika Clerk:", user.id);
-    
-    // KLUCZOWA ZMIANA: Użyj bezpośrednio supabaseAdmin zamiast createUserProfile
-    const { data: createdProfile, error: createError } = await supabaseAdmin
+    // Pobierz profil użytkownika bezpośrednio przez RLS - Supabase automatycznie 
+    // uwzględni ID użytkownika na podstawie tokena
+    const { data: userProfile, error } = await supabase
       .from('user_profiles')
-      .insert([newProfile])
-      .select()
+      .select('*')
+      .eq('external_auth_id', user.id)
       .single();
     
-    if (createError) {
-      console.error('Error creating user profile with supabaseAdmin:', createError);
-      return NextResponse.json(
-        { error: 'Failed to create user profile', details: createError },
-        { status: 500 }
-      );
+    // Jeśli profil nie istnieje, zwróć podstawowe dane z Clerk bez tworzenia profilu
+    // Profil zostanie utworzony przez trigger bazodanowy lub politykę RLS
+    if (error || !userProfile) {
+      // Zwróć podstawowe dane użytkownika z Clerk
+      return NextResponse.json({
+        id: user.id,
+        display_name: user.firstName 
+          ? `${user.firstName} ${user.lastName || ''}`.trim() 
+          : (user.username || 'Nowy użytkownik'),
+        email: user.emailAddresses[0]?.emailAddress || '',
+        avatar_url: user.imageUrl || null,
+        is_new_user: true
+      });
     }
     
-    console.log("Utworzono profil:", createdProfile.id);
-    return NextResponse.json(createdProfile);
+    return NextResponse.json(userProfile);
   } catch (error) {
     console.error('Error in profile API:', error);
     return NextResponse.json(
@@ -90,6 +73,12 @@ export async function PATCH(request) {
       );
     }
     
+    // Pobierz token Supabase z sesji Clerk
+    const supabaseToken = await user.getToken({ template: 'supabase' });
+    
+    // Utwórz klienta Supabase z tokenem sesji
+    const supabase = getSupabaseClient(supabaseToken);
+    
     // Pobierz dane z żądania
     const updates = await request.json();
     
@@ -102,31 +91,21 @@ export async function PATCH(request) {
       }
     }
     
-    // Sprawdź, czy użytkownik ma profil w bazie danych
-    const userProfile = await getUserByAuthId(user.id);
-    
-    if (!userProfile) {
-      return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Aktualizuj profil z supabaseAdmin
-    const { data: updated, error: updateError } = await supabaseAdmin
+    // Aktualizuj profil - Supabase automatycznie ograniczy dostęp poprzez RLS
+    const { data: updated, error } = await supabase
       .from('user_profiles')
       .update({
         ...updates,
         updated_at: new Date().toISOString()
       })
-      .eq('id', userProfile.id)
+      .eq('external_auth_id', user.id)
       .select()
       .single();
     
-    if (updateError) {
-      console.error('Error updating profile:', updateError);
+    if (error) {
+      console.error('Error updating profile:', error);
       return NextResponse.json(
-        { error: 'Failed to update profile', details: updateError },
+        { error: 'Failed to update profile', details: error },
         { status: 500 }
       );
     }

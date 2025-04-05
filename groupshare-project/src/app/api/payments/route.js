@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import supabase from '../../../lib/supabase-client';
-import supabaseAdmin from '../../../lib/supabase-admin-client';
+import { getSupabaseClient } from '../../../lib/supabase-client';
+import crypto from 'crypto';
 
 /**
  * POST /api/payments
@@ -20,38 +20,9 @@ export async function POST(request) {
       );
     }
     
-    // Pobierz lub utwórz profil użytkownika poprzez dedykowane API
-    let userProfileId;
-    try {
-      // Get the auth token from the Clerk user
-      const authToken = await user.getToken();
-      
-      // Wykorzystanie istniejącego endpointu, który ma odpowiednie uprawnienia
-      const profileResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`  // Add token to the request
-          }
-        }
-      );
-      
-      if (!profileResponse.ok) {
-        throw new Error(`Failed to fetch user profile: ${profileResponse.status}`);
-      }
-      
-      const userProfile = await profileResponse.json();
-      userProfileId = userProfile.id;
-      
-    } catch (error) {
-      console.error('Error fetching or creating user profile:', error);
-      return NextResponse.json(
-        { error: 'Failed to retrieve user profile' },
-        { status: 500 }
-      );
-    }
+    // Uzyskaj token Supabase z sesji Clerk
+    const supabaseToken = await user.getToken({ template: 'supabase' });
+    const supabase = getSupabaseClient(supabaseToken);
     
     // Pobierz zakup i powiązaną ofertę
     const { data: purchase, error: purchaseError } = await supabase
@@ -71,31 +42,15 @@ export async function POST(request) {
       );
     }
     
-    if (!purchase) {
-      return NextResponse.json(
-        { error: 'Purchase record not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Sprawdź, czy zakup należy do użytkownika
-    if (purchase.user_id !== userProfileId) {
-      console.warn(`Security warning: User ${userProfileId} attempted to process payment for purchase ${purchaseId} belonging to user ${purchase.user_id}`);
-      return NextResponse.json(
-        { error: 'You do not have permission to process this payment' },
-        { status: 403 }
-      );
-    }
-    
     // Wywołaj funkcję process_payment z bazy danych
     const { data: paymentResult, error: paymentError } = await supabase.rpc(
       'process_payment',
       {
-        p_user_id: userProfileId,
+        p_user_id: user.id,
         p_group_sub_id: purchase.group_sub_id,
         p_payment_method: paymentMethod,
         p_payment_provider: 'stripe', // Możemy dostosować w zależności od wyboru
-        p_payment_id: 'pmt_' + Math.random().toString(36).substr(2, 9) // Przykładowe ID
+        p_payment_id: 'pmt_' + crypto.randomBytes(8).toString('hex')
       }
     );
     
@@ -114,32 +69,23 @@ export async function POST(request) {
     
     if (tokenError) {
       console.error('Error generating token:', tokenError);
-      // Płatność już się powiodła, ale logujemy błąd
-      // Używamy tokenu zapasowego tylko w ostateczności
     }
     
     // Użyj bezpiecznego tokenu z bazy danych lub wygeneruj zapasowy
-    // W produkcji powinno być obsłużone bardziej rygorystycznie
     const token = tokenData || crypto.randomBytes(32).toString('hex');
     
-    try {
-      // Zapisanie tokenu dostępu używając administratora Supabase (aby ominąć RLS)
-      const { error: insertError } = await supabaseAdmin
-        .from('access_tokens')
-        .insert({
-          purchase_record_id: purchaseId,
-          token_hash: hashToken(token), 
-          expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minut
-          used: false
-        });
-        
-      if (insertError) {
-        console.error('Error saving access token:', insertError);
-        // Kontynuujemy, ale logujemy błąd
-      }
-    } catch (insertError) {
-      console.error('Exception when saving access token:', insertError);
-      // Kontynuujemy mimo błędu, płatność już została zrealizowana
+    // Zapisanie tokenu dostępu
+    const { error: insertError } = await supabase
+      .from('access_tokens')
+      .insert({
+        purchase_record_id: purchaseId,
+        token_hash: hashToken(token),
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minut
+        used: false
+      });
+      
+    if (insertError) {
+      console.error('Error saving access token:', insertError);
     }
     
     // Tworzymy URL dostępu
@@ -162,8 +108,8 @@ export async function POST(request) {
 
 // Bezpieczna funkcja hashująca token
 function hashToken(token) {
-  return require('crypto')
+  return crypto
     .createHash('sha256')
-    .update(token + process.env.TOKEN_SALT || '')
+    .update(token + (process.env.TOKEN_SALT || ''))
     .digest('hex');
 }

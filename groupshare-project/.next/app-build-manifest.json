@@ -16,11 +16,6 @@
       "static/chunks/main-app.js",
       "static/chunks/app/offers/page.js"
     ],
-    "/checkout/[id]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/checkout/[id]/page.js"
-    ],
     "/dashboard/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
