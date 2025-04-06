@@ -2,45 +2,20 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useUser } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/useAuth'; // Zmiana importu
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 
 export default function Dashboard() {
-  const { user, isLoaded } = useUser();
+  const { profile, isLoading, supabase } = useAuth(); // Użyj nowego hooka
   const [applications, setApplications] = useState([]);
   const [pendingApplications, setPendingApplications] = useState([]);
   const [groups, setGroups] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [error, setError] = useState(null);
-  const [profileSynced, setProfileSynced] = useState(false);
 
-  // Dodana funkcja do synchronizacji profilu
+  // Pobierz dane po załadowaniu profilu
   useEffect(() => {
-    if (!isLoaded || !user) return;
-
-    // Synchronizuj profil przed pobraniem danych
-    const syncUserProfile = async () => {
-      try {
-        console.log("Synchronizacja profilu użytkownika...");
-        const profileRes = await fetch('/api/auth/profile');
-        if (!profileRes.ok) {
-          throw new Error('Failed to sync user profile');
-        }
-        const profileData = await profileRes.json();
-        console.log("Profil zsynchronizowany:", profileData.id);
-        setProfileSynced(true);
-      } catch (err) {
-        console.error('Error syncing user profile:', err);
-        setError('Nie udało się zsynchronizować profilu użytkownika. Odśwież stronę, aby spróbować ponownie.');
-      }
-    };
-
-    syncUserProfile();
-  }, [user, isLoaded]);
-
-  // Pobierz dane po załadowaniu i synchronizacji profilu
-  useEffect(() => {
-    if (!isLoaded || !user || !profileSynced) return;
+    if (isLoading || !profile) return;
 
     const fetchDashboardData = async () => {
       setIsLoadingData(true);
@@ -60,11 +35,22 @@ export default function Dashboard() {
           setPendingApplications(pendingData);
         }
 
-        // Pobierz grupy użytkownika
-        const groupsRes = await fetch('/api/groups');
-        if (!groupsRes.ok) throw new Error('Failed to fetch groups');
-        const groupsData = await groupsRes.json();
-        setGroups(groupsData);
+        // Pobierz grupy użytkownika - bezpośrednio z Supabase
+        const { data: groupsData, error: groupsError } = await supabase
+          .from('groups')
+          .select(`
+            id,
+            name,
+            description,
+            owner_id,
+            created_at,
+            updated_at
+          `)
+          .order('created_at', { ascending: false });
+        
+        if (groupsError) throw groupsError;
+        setGroups(groupsData || []);
+
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
         setError('Nie udało się pobrać wszystkich danych. Odśwież stronę, aby spróbować ponownie.');
@@ -74,15 +60,15 @@ export default function Dashboard() {
     };
 
     fetchDashboardData();
-  }, [user, isLoaded, profileSynced]);
+  }, [profile, isLoading, supabase]);
 
   // Wyświetl stan ładowania
-  if (!isLoaded || isLoadingData) {
+  if (isLoading || isLoadingData) {
     return <LoadingSpinner />;
   }
 
   // Jeśli użytkownik nie jest zalogowany, przekierowanie obsłuży middleware
-  if (!user) {
+  if (!profile) {
     return <LoadingSpinner />;
   }
 

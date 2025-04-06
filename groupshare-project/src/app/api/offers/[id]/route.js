@@ -1,7 +1,7 @@
-// src/app/api/offers/[id]/route.js
 import { NextResponse } from 'next/server';
-import { getSubscriptionOffer } from '@/lib/supabase';
 import { currentUser } from '@clerk/nextjs/server';
+import supabase from '@/lib/supabase-client';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * GET /api/offers/[id]
@@ -18,10 +18,19 @@ export async function GET(request, { params }) {
       );
     }
 
-    // Get the subscription offer
-    const offer = await getSubscriptionOffer(id);
+    // Używając standardowego klienta supabase, bo nie potrzebujemy autoryzacji dla tego endpointu
+    const { data: offer, error } = await supabase
+      .from('group_subs')
+      .select(`
+        *,
+        subscription_platforms(*),
+        groups(id, name, description),
+        owner:groups!inner(owner_id, user_profiles!inner(id, display_name, avatar_url, rating_avg, rating_count, verification_level, bio))
+      `)
+      .eq('id', id)
+      .single();
 
-    if (!offer) {
+    if (error) {
       return NextResponse.json(
         { error: 'Subscription offer not found' },
         { status: 404 }
@@ -65,56 +74,41 @@ export async function PATCH(request, { params }) {
     // Parse request body
     const updates = await request.json();
 
-    // Get the original offer to verify ownership
-    const offer = await getSubscriptionOffer(id);
+    // Pobierz token z Clerk
+    const clerkToken = await user.getToken();
 
-    if (!offer) {
-      return NextResponse.json(
-        { error: 'Subscription offer not found' },
-        { status: 404 }
-      );
-    }
-
-    // Get auth token
-    const authToken = await user.getToken();
-
-    // Get user profile ID from Supabase
-    const userProfileResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
+    // Stwórz autoryzowany klient Supabase używając tokenu Clerk
+    const supabaseWithAuth = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Add token to the request
+        global: {
+          headers: {
+            Authorization: `Bearer ${clerkToken}`
+          }
         }
       }
     );
 
-    const userProfile = await userProfileResponse.json();
-    if (!userProfile || !userProfile.id) {
+    // Pobierz oryginalną ofertę i sprawdź, czy użytkownik ma uprawnienia
+    const { data: offer, error: offerError } = await supabaseWithAuth
+      .from('group_subs')
+      .select(`
+        *,
+        groups!inner(id, owner_id)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (offerError) {
+      console.error('Error fetching offer:', offerError);
       return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404 }
+        { error: 'Subscription offer not found or access denied', code: offerError.code },
+        { status: offerError.code === 'PGRST116' ? 404 : 403 }
       );
     }
-
-    // Verify user is the owner or admin of the group
-    const groupResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/groups/${offer.group_id}/members?userId=${userProfile.id}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Add token to the request
-        }
-      }
-    );
-
-    const groupMembership = await groupResponse.json();
-    if (!groupMembership || (groupMembership.role !== 'admin' && !groupMembership.isOwner)) {
-      return NextResponse.json(
-        { error: 'You do not have permission to update this offer' },
-        { status: 403 }
-      );
-    }
-
-    // Prepare update data
+    
+    // Przygotuj dane do aktualizacji
     const updateData = {
       status: updates.status || offer.status,
       price_per_slot: updates.pricePerSlot || offer.price_per_slot,
@@ -124,37 +118,37 @@ export async function PATCH(request, { params }) {
       instant_access: true // Zawsze true w nowym modelu
     };
 
-    // Update offer in Supabase
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/supabase/group_subs/${id}`,
-      {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}` // Add token to the request
-        },
-        body: JSON.stringify(updateData)
-      }
-    );
-
-    const updatedOffer = await response.json();
-
-    // If access instructions provided, update them
-    if (updates.accessInstructions) {
-      await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/access-instructions`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}` // Add token to the request
-          },
-          body: JSON.stringify({
-            groupSubId: id,
-            instructions: updates.accessInstructions
-          })
-        }
+    // Aktualizuj ofertę z autoryzowanym klientem
+    const { data: updatedOffer, error: updateError } = await supabaseWithAuth
+      .from('group_subs')
+      .update(updateData)
+      .eq('id', id)
+      .select();
+      
+    if (updateError) {
+      console.error('Error updating offer:', updateError);
+      return NextResponse.json(
+        { error: 'Failed to update offer', details: updateError },
+        { status: 500 }
       );
+    }
+
+    // Jeśli podano instrukcje dostępu, aktualizuj je
+    if (updates.accessInstructions) {
+      const { error: instructionsError } = await supabaseWithAuth
+        .from('access_instructions')
+        .upsert({
+          group_sub_id: id,
+          instructions: updates.accessInstructions,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'group_sub_id'
+        });
+
+      if (instructionsError) {
+        console.warn('Error updating access instructions:', instructionsError);
+        // Kontynuujemy pomimo błędu, ponieważ główna aktualizacja się powiodła
+      }
     }
 
     return NextResponse.json(updatedOffer);
@@ -191,65 +185,53 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    // Get the original offer to verify ownership
-    const offer = await getSubscriptionOffer(id);
+    // Pobierz token z Clerk
+    const clerkToken = await user.getToken();
 
-    if (!offer) {
-      return NextResponse.json(
-        { error: 'Subscription offer not found' },
-        { status: 404 }
-      );
-    }
-
-    // Get auth token
-    const authToken = await user.getToken();
-
-    // Get user profile ID from Supabase
-    const userProfileResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
+    // Stwórz autoryzowany klient Supabase używając tokenu Clerk
+    const supabaseWithAuth = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Add token to the request
+        global: {
+          headers: {
+            Authorization: `Bearer ${clerkToken}`
+          }
         }
       }
     );
 
-    const userProfile = await userProfileResponse.json();
-    if (!userProfile || !userProfile.id) {
+    // Pobierz ofertę i sprawdź, czy użytkownik ma uprawnienia (RLS w Supabase sprawdzi to automatycznie)
+    const { data: offer, error: offerError } = await supabaseWithAuth
+      .from('group_subs')
+      .select(`
+        *,
+        groups!inner(id, owner_id)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (offerError) {
+      console.error('Error fetching offer:', offerError);
       return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404 }
+        { error: 'Subscription offer not found or access denied', code: offerError.code },
+        { status: offerError.code === 'PGRST116' ? 404 : 403 }
       );
     }
 
-    // Verify user is the owner or admin of the group
-    const groupResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/groups/${offer.group_id}/members?userId=${userProfile.id}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Add token to the request
-        }
-      }
-    );
+    // Usuń ofertę z autoryzowanym klientem
+    const { error: deleteError } = await supabaseWithAuth
+      .from('group_subs')
+      .delete()
+      .eq('id', id);
 
-    const groupMembership = await groupResponse.json();
-    if (!groupMembership || (groupMembership.role !== 'admin' && !groupMembership.isOwner)) {
+    if (deleteError) {
+      console.error('Error deleting offer:', deleteError);
       return NextResponse.json(
-        { error: 'You do not have permission to delete this offer' },
-        { status: 403 }
+        { error: 'Failed to delete offer', details: deleteError },
+        { status: 500 }
       );
     }
-
-    // Delete offer in Supabase
-    await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/supabase/group_subs/${id}`,
-      {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Add token to the request
-        }
-      }
-    );
 
     return NextResponse.json(
       { message: 'Subscription offer deleted successfully' }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
+import { getCurrentUserProfile } from '@/lib/auth-service';
 import supabase from '../../../lib/supabase-client';
 import supabaseAdmin from '../../../lib/supabase-admin-client';
 
@@ -11,45 +11,13 @@ export async function POST(request) {
   try {
     const { purchaseId, paymentMethod } = await request.json();
     
-    // Sprawdź autentykację
-    const user = await currentUser();
-    if (!user) {
+    // Pobierz profil użytkownika
+    const userProfile = await getCurrentUserProfile();
+    
+    if (!userProfile) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
-      );
-    }
-    
-    // Pobierz lub utwórz profil użytkownika poprzez dedykowane API
-    let userProfileId;
-    try {
-      // Get the auth token from the Clerk user
-      const authToken = await user.getToken();
-      
-      // Wykorzystanie istniejącego endpointu, który ma odpowiednie uprawnienia
-      const profileResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`  // Add token to the request
-          }
-        }
-      );
-      
-      if (!profileResponse.ok) {
-        throw new Error(`Failed to fetch user profile: ${profileResponse.status}`);
-      }
-      
-      const userProfile = await profileResponse.json();
-      userProfileId = userProfile.id;
-      
-    } catch (error) {
-      console.error('Error fetching or creating user profile:', error);
-      return NextResponse.json(
-        { error: 'Failed to retrieve user profile' },
-        { status: 500 }
       );
     }
     
@@ -79,8 +47,8 @@ export async function POST(request) {
     }
     
     // Sprawdź, czy zakup należy do użytkownika
-    if (purchase.user_id !== userProfileId) {
-      console.warn(`Security warning: User ${userProfileId} attempted to process payment for purchase ${purchaseId} belonging to user ${purchase.user_id}`);
+    if (purchase.user_id !== userProfile.id) {
+      console.warn(`Security warning: User ${userProfile.id} attempted to process payment for purchase ${purchaseId} belonging to user ${purchase.user_id}`);
       return NextResponse.json(
         { error: 'You do not have permission to process this payment' },
         { status: 403 }
@@ -91,7 +59,7 @@ export async function POST(request) {
     const { data: paymentResult, error: paymentError } = await supabase.rpc(
       'process_payment',
       {
-        p_user_id: userProfileId,
+        p_user_id: userProfile.id,
         p_group_sub_id: purchase.group_sub_id,
         p_payment_method: paymentMethod,
         p_payment_provider: 'stripe', // Możemy dostosować w zależności od wyboru

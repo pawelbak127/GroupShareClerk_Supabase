@@ -1,0 +1,162 @@
+import { currentUser, auth } from '@clerk/nextjs/server';
+import supabase from './supabase-client';
+import supabaseAdmin from './supabase-admin-client';
+
+/**
+ * Pobiera aktualny profil użytkownika z bazy danych
+ */
+export async function getCurrentUserProfile() {
+  const user = await currentUser();
+  
+  if (!user) return null;
+  
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('external_auth_id', user.id)
+    .single();
+  
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching user profile:', error);
+  }
+  
+  return data;
+}
+
+/**
+ * Pobiera profil użytkownika Clerk i tworzy go jeśli nie istnieje
+ */
+export async function getOrCreateUserProfile() {
+  const user = await currentUser();
+  
+  if (!user) return null;
+  
+  // Próba pobrania istniejącego profilu
+  const userProfile = await getCurrentUserProfile();
+  
+  // Jeśli profil istnieje, zwróć go
+  if (userProfile) {
+    return userProfile;
+  }
+  
+  // W przeciwnym razie utwórz nowy profil
+  const newProfile = {
+    external_auth_id: user.id,
+    display_name: user.firstName 
+      ? `${user.firstName} ${user.lastName || ''}`.trim() 
+      : (user.username || 'Nowy użytkownik'),
+    email: user.emailAddresses[0]?.emailAddress || '',
+    phone_number: user.phoneNumbers[0]?.phoneNumber || null,
+    profile_type: 'both',
+    verification_level: 'basic',
+    bio: '',
+    avatar_url: user.imageUrl || null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  
+  const { data: createdProfile, error: createError } = await supabaseAdmin
+    .from('user_profiles')
+    .insert([newProfile])
+    .select()
+    .single();
+  
+  if (createError) {
+    console.error('Error creating user profile:', createError);
+    return null;
+  }
+  
+  return createdProfile;
+}
+
+/**
+ * Sprawdza, czy użytkownik jest właścicielem grupy
+ */
+export async function isGroupOwner(groupId) {
+  const profile = await getCurrentUserProfile();
+  if (!profile) return false;
+  
+  const { data } = await supabase
+    .from('groups')
+    .select('owner_id')
+    .eq('id', groupId)
+    .single();
+  
+  return data?.owner_id === profile.id;
+}
+
+/**
+ * Sprawdza, czy użytkownik jest administratorem grupy
+ */
+export async function isGroupAdmin(groupId) {
+  const profile = await getCurrentUserProfile();
+  if (!profile) return false;
+  
+  // Sprawdzenie, czy jest właścicielem
+  if (await isGroupOwner(groupId)) return true;
+  
+  // Sprawdzenie, czy jest adminem
+  const { data } = await supabase
+    .from('group_members')
+    .select('role')
+    .eq('group_id', groupId)
+    .eq('user_id', profile.id)
+    .eq('status', 'active')
+    .single();
+  
+  return data?.role === 'admin';
+}
+
+/**
+ * Sprawdza, czy użytkownik ma uprawnienia do oferty subskrypcji
+ */
+export async function hasSubscriptionOfferAccess(offerId) {
+  const profile = await getCurrentUserProfile();
+  if (!profile) return false;
+  
+  const { data: offer } = await supabase
+    .from('group_subs')
+    .select('group_id')
+    .eq('id', offerId)
+    .single();
+  
+  if (!offer) return false;
+  
+  return await isGroupAdmin(offer.group_id);
+}
+
+/**
+ * Sprawdza, czy użytkownik jest właścicielem zakupu
+ */
+export async function isPurchaseOwner(purchaseId) {
+  const profile = await getCurrentUserProfile();
+  if (!profile) return false;
+  
+  const { data } = await supabase
+    .from('purchase_records')
+    .select('user_id')
+    .eq('id', purchaseId)
+    .single();
+  
+  return data?.user_id === profile.id;
+}
+
+/**
+ * Wykonuje uwierzytelnione zapytanie HTTP (gdyby było potrzebne)
+ */
+export async function authenticatedFetch(url, options = {}) {
+  try {
+    const user = await currentUser();
+    if (!user) {
+      throw new Error('Unauthorized');
+    }
+    
+    // W nowym modelu integracji, nie potrzebujemy dodawać tokenu
+    // JWT jest już obsługiwany automatycznie
+    
+    return fetch(url, options);
+  } catch (error) {
+    console.error('Error in authenticatedFetch:', error);
+    throw error;
+  }
+}

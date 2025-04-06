@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import supabase from '@/lib/supabase-client';
 import supabaseAdmin from '@/lib/supabase-admin-client';
+import { createClient } from '@supabase/supabase-js';
 
 /**
  * POST /api/purchases/[id]/confirm-access
@@ -28,39 +28,24 @@ export async function POST(request, { params }) {
       );
     }
     
-    // Get auth token
-    const authToken = await user.getToken();
+    // Pobierz token z Clerk
+    const clerkToken = await user.getToken();
     
-    // Pobierz profil użytkownika
-    let userProfileId;
-    try {
-      const profileResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
-        {
-          method: 'GET',
+    // Stwórz autoryzowany klient Supabase używając tokenu Clerk
+    const supabaseWithAuth = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        global: {
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}` // Add token to the request
+            Authorization: `Bearer ${clerkToken}`
           }
         }
-      );
-      
-      if (!profileResponse.ok) {
-        throw new Error(`Failed to fetch user profile: ${profileResponse.status}`);
       }
-      
-      const userProfile = await profileResponse.json();
-      userProfileId = userProfile.id;
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      return NextResponse.json(
-        { error: 'Failed to verify user profile' },
-        { status: 500 }
-      );
-    }
+    );
     
-    // Pobierz informacje o zakupie
-    const { data: purchase, error: purchaseError } = await supabase
+    // Pobierz informacje o zakupie - RLS w Supabase automatycznie sprawdzi dostęp użytkownika
+    const { data: purchase, error: purchaseError } = await supabaseWithAuth
       .from('purchase_records')
       .select(`
         id,
@@ -81,35 +66,13 @@ export async function POST(request, { params }) {
           { error: 'Purchase record not found', code: purchaseError.code },
           { status: 404 }
         );
-      } else if (purchaseError.code === '42501') {
-        console.error('Permission denied when fetching purchase record:', purchaseError);
-        return NextResponse.json(
-          { error: 'You do not have permission to access this purchase record', code: purchaseError.code },
-          { status: 403 }
-        );
       } else {
         console.error('Error fetching purchase record:', purchaseError);
         return NextResponse.json(
           { error: purchaseError.message || 'Failed to fetch purchase record', code: purchaseError.code },
-          { status: 500 }
+          { status: 403 }
         );
       }
-    }
-    
-    if (!purchase) {
-      return NextResponse.json(
-        { error: 'Purchase record not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Sprawdź, czy użytkownik ma prawo potwierdzać dostęp
-    if (purchase.user_id !== userProfileId) {
-      console.warn(`User ${userProfileId} attempted to confirm access for purchase ${id} belonging to user ${purchase.user_id}`);
-      return NextResponse.json(
-        { error: 'You can only confirm your own purchases' },
-        { status: 403 }
-      );
     }
     
     // Sprawdź, czy dostęp został wcześniej udostępniony
@@ -120,8 +83,8 @@ export async function POST(request, { params }) {
       );
     }
     
-    // Aktualizuj status potwierdzenia
-    const { data: updateData, error: updateError } = await supabase
+    // Aktualizuj status potwierdzenia z autoryzowanym klientem
+    const { data: updateData, error: updateError } = await supabaseWithAuth
       .from('purchase_records')
       .update({
         access_confirmed: true,
@@ -131,25 +94,11 @@ export async function POST(request, { params }) {
       .select();
     
     if (updateError) {
-      if (updateError.code === '42501') {
-        console.error('Permission denied when confirming access:', updateError);
-        return NextResponse.json(
-          { error: 'You do not have permission to confirm this access', code: updateError.code },
-          { status: 403 }
-        );
-      } else if (updateError.code === 'PGRST116') {
-        console.error('Purchase record not found during confirmation:', updateError);
-        return NextResponse.json(
-          { error: 'Purchase record not found', code: updateError.code },
-          { status: 404 }
-        );
-      } else {
-        console.error('Error confirming access:', updateError);
-        return NextResponse.json(
-          { error: updateError.message || 'Failed to confirm access', code: updateError.code },
-          { status: 500 }
-        );
-      }
+      console.error('Error confirming access:', updateError);
+      return NextResponse.json(
+        { error: updateError.message || 'Failed to confirm access', code: updateError.code },
+        { status: updateError.code === 'PGRST116' ? 404 : 500 }
+      );
     }
     
     // Sprawdzenie czy dane zostały zaktualizowane
@@ -163,8 +112,8 @@ export async function POST(request, { params }) {
     
     // Jeśli dostęp nie działa, utwórz spór
     if (!isWorking) {
-      // Pobierz powiązaną transakcję
-      const { data: transactionData, error: transactionError } = await supabase
+      // Pobierz powiązaną transakcję z autoryzowanym klientem
+      const { data: transactionData, error: transactionError } = await supabaseWithAuth
         .from('transactions')
         .select('id')
         .eq('purchase_record_id', id)
@@ -177,17 +126,12 @@ export async function POST(request, { params }) {
       
       const transactionId = transactionData?.id;
       
-      if (!transactionId) {
-        console.warn(`No transaction found for purchase ${id}`);
-        // Utworzenie sporu bez ID transakcji
-      }
-      
       try {
-        // Używamy supabaseAdmin aby ominąć RLS
+        // Nadal używamy supabaseAdmin dla pewnych operacji, które wymagają uprawnień admina
         const { data: dispute, error: disputeError } = await supabaseAdmin
           .from('disputes')
           .insert({
-            reporter_id: userProfileId,
+            reporter_id: purchase.user_id,  // Używamy purchase.user_id zamiast dodatkowego pobierania profilu
             reported_entity_type: 'subscription',
             reported_entity_id: purchase.group_sub_id,
             transaction_id: transactionId,
@@ -209,18 +153,9 @@ export async function POST(request, { params }) {
           });
         }
         
-        if (!dispute) {
-          console.warn('No dispute data returned after creation');
-          return NextResponse.json({
-            message: 'Access confirmation successful, but dispute record may not have been created',
-            confirmed: true,
-            disputeCreated: false
-          });
-        }
-        
         // Powiadom kupującego
         await createNotification(
-          userProfileId,
+          purchase.user_id,
           'dispute_created',
           'Zgłoszenie problemu z dostępem',
           'Twoje zgłoszenie zostało zarejestrowane. Skontaktujemy się z Tobą wkrótce.',

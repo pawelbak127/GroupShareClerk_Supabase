@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
-import { getUserByAuthId } from '../../../../lib/supabase-client';
-import supabaseAdmin from '../../../../lib/supabase-admin-client';
+import { getOrCreateUserProfile } from '@/lib/auth-service';
 
 /**
  * GET /api/auth/profile
@@ -9,62 +7,17 @@ import supabaseAdmin from '../../../../lib/supabase-admin-client';
  */
 export async function GET() {
   try {
-    // Pobierz dane zalogowanego użytkownika z Clerk
-    const user = await currentUser();
+    // Użyj funkcji z auth-service
+    const userProfile = await getOrCreateUserProfile();
     
-    if (!user) {
+    if (!userProfile) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
     
-    console.log("Użytkownik Clerk:", user.id);
-    
-    // Sprawdź, czy użytkownik ma profil w bazie danych
-    const userProfile = await getUserByAuthId(user.id);
-    
-    // Jeśli profil istnieje, zwróć go
-    if (userProfile) {
-      console.log("Znaleziono istniejący profil:", userProfile.id);
-      return NextResponse.json(userProfile);
-    }
-    
-    // W przeciwnym razie utwórz nowy profil
-    const newProfile = {
-      external_auth_id: user.id,
-      display_name: user.firstName 
-        ? `${user.firstName} ${user.lastName || ''}`.trim() 
-        : (user.username || 'Nowy użytkownik'),
-      email: user.emailAddresses[0]?.emailAddress || '',
-      phone_number: user.phoneNumbers[0]?.phoneNumber || null,
-      profile_type: 'both', // Domyślna wartość
-      verification_level: 'basic', // Domyślna wartość
-      bio: '',
-      avatar_url: user.imageUrl || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-    
-    console.log("Tworzenie nowego profilu dla użytkownika Clerk:", user.id);
-    
-    // KLUCZOWA ZMIANA: Użyj bezpośrednio supabaseAdmin zamiast createUserProfile
-    const { data: createdProfile, error: createError } = await supabaseAdmin
-      .from('user_profiles')
-      .insert([newProfile])
-      .select()
-      .single();
-    
-    if (createError) {
-      console.error('Error creating user profile with supabaseAdmin:', createError);
-      return NextResponse.json(
-        { error: 'Failed to create user profile', details: createError },
-        { status: 500 }
-      );
-    }
-    
-    console.log("Utworzono profil:", createdProfile.id);
-    return NextResponse.json(createdProfile);
+    return NextResponse.json(userProfile);
   } catch (error) {
     console.error('Error in profile API:', error);
     return NextResponse.json(
@@ -80,10 +33,10 @@ export async function GET() {
  */
 export async function PATCH(request) {
   try {
-    // Pobierz dane zalogowanego użytkownika z Clerk
-    const user = await currentUser();
+    // Użyj funkcji z auth-service
+    const userProfile = await getOrCreateUserProfile();
     
-    if (!user) {
+    if (!userProfile) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -100,16 +53,6 @@ export async function PATCH(request) {
       if (field in updates) {
         delete updates[field];
       }
-    }
-    
-    // Sprawdź, czy użytkownik ma profil w bazie danych
-    const userProfile = await getUserByAuthId(user.id);
-    
-    if (!userProfile) {
-      return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404 }
-      );
     }
     
     // Aktualizuj profil z supabaseAdmin

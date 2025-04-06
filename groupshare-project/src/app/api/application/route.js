@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
+import { getCurrentUserProfile } from '@/lib/auth-service';
 import supabase from '../../../lib/supabase-client';
 
 /**
@@ -8,37 +8,15 @@ import supabase from '../../../lib/supabase-client';
  */
 export async function GET(request) {
   try {
-    // Sprawdź autentykację
-    const user = await currentUser();
-    if (!user) {
+    // Pobierz profil użytkownika
+    const userProfile = await getCurrentUserProfile();
+    
+    if (!userProfile) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
-
-    // Get auth token
-    const authToken = await user.getToken();
-
-    // Pobierz profil użytkownika
-    const profileResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}` // Add token to the request
-        }
-      }
-    );
-
-    if (!profileResponse.ok) {
-      return NextResponse.json(
-        { error: 'Failed to fetch user profile' },
-        { status: profileResponse.status }
-      );
-    }
-
-    const userProfile = await profileResponse.json();
 
     // Pobierz parametry z URL
     const { searchParams } = new URL(request.url);
