@@ -46,26 +46,39 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- STEP 2: USER CREATION AND SYNCHRONIZATION
 
 -- Function to automatically create a user profile for Clerk users
-CREATE OR REPLACE FUNCTION create_profile_for_clerk_user()
-RETURNS TRIGGER AS $$
+-- via JWT token claims
+CREATE OR REPLACE FUNCTION auth.create_profile_from_jwt() RETURNS TRIGGER AS $$
 DECLARE
   new_user_id TEXT;
   user_email TEXT;
   user_name TEXT;
 BEGIN
-  -- This will be called from a webhook or auth trigger
-  new_user_id := NEW.id::text;
-  user_email := NEW.email;
+  -- Extract user info from JWT claims
+  new_user_id := auth.clerk_user_id();
   
-  -- Build user name from first and last name if available
-  IF NEW.first_name IS NOT NULL THEN
-    user_name := NEW.first_name;
-    IF NEW.last_name IS NOT NULL THEN
-      user_name := user_name || ' ' || NEW.last_name;
-    END IF;
-  ELSE
-    user_name := COALESCE(NEW.username, 'User ' || substring(NEW.id, 1, 8));
+  -- Only proceed if we have a valid user ID
+  IF new_user_id IS NULL THEN
+    RETURN NULL;
   END IF;
+  
+  -- Get email from JWT claims if available
+  BEGIN
+    user_email := nullif(current_setting('request.jwt.claims', true)::json->>'email', '')::text;
+  EXCEPTION
+    WHEN others THEN
+      user_email := 'no-email@example.com';
+  END;
+  
+  -- Try to get name from JWT claims
+  BEGIN
+    user_name := nullif(current_setting('request.jwt.claims', true)::json->>'name', '')::text;
+    IF user_name IS NULL THEN
+      user_name := 'User ' || substring(new_user_id, 1, 8);
+    END IF;
+  EXCEPTION
+    WHEN others THEN
+      user_name := 'User ' || substring(new_user_id, 1, 8);
+  END;
   
   -- Only insert if user doesn't exist already
   IF NOT EXISTS (SELECT 1 FROM user_profiles WHERE external_auth_id = new_user_id) THEN
@@ -75,7 +88,6 @@ BEGIN
       email,
       profile_type,
       verification_level,
-      avatar_url,
       created_at,
       updated_at
     ) VALUES (
@@ -84,17 +96,31 @@ BEGIN
       user_email,
       'both',
       'basic',
-      NEW.image_url,
       NOW(),
       NOW()
     );
   END IF;
   
-  RETURN NEW;
+  RETURN NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Public function to handle Clerk webhooks
+-- Create a trigger to automatically create profiles when JWT is validated
+CREATE OR REPLACE FUNCTION install_jwt_trigger() RETURNS VOID AS $$
+BEGIN
+  DROP TRIGGER IF EXISTS create_profile_from_jwt_trigger ON auth.jwt_claim;
+  
+  CREATE TRIGGER create_profile_from_jwt_trigger
+  AFTER INSERT ON auth.jwt_claim
+  FOR EACH ROW
+  EXECUTE FUNCTION auth.create_profile_from_jwt();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Install the trigger
+SELECT install_jwt_trigger();
+
+-- Public function to handle Clerk webhooks for direct user creation
 CREATE OR REPLACE FUNCTION public.handle_clerk_user_creation(
   user_id TEXT,
   email TEXT,
@@ -222,12 +248,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- STEP 4: TRIGGERS AND EVENT HANDLERS
 
--- Automatically create/update user profile on auth changes
-CREATE TRIGGER update_user_profile_on_auth_change
-AFTER INSERT OR UPDATE ON auth.users
-FOR EACH ROW
-EXECUTE FUNCTION create_profile_for_clerk_user();
-
 -- Log user profile changes for audit trail
 CREATE TRIGGER log_user_profile_changes
 AFTER INSERT OR UPDATE ON user_profiles
@@ -336,5 +356,5 @@ COMMENT ON FUNCTION auth.clerk_user_id IS 'Gets the Clerk user ID from the JWT t
 COMMENT ON FUNCTION public.get_user_profile_id IS 'Gets the internal user profile ID from a Clerk user ID';
 COMMENT ON FUNCTION public.current_user_profile_id IS 'Gets the current user''s profile ID based on their Clerk ID';
 COMMENT ON FUNCTION public.clerk_user_exists IS 'Checks if a user with the current Clerk ID exists in the database';
-COMMENT ON FUNCTION create_profile_for_clerk_user IS 'Automatically creates a user profile for new Clerk users';
+COMMENT ON FUNCTION auth.create_profile_from_jwt IS 'Automatically creates a user profile when JWT claim is processed';
 COMMENT ON FUNCTION handle_clerk_user_creation IS 'Webhook handler for user creation/updates from Clerk';

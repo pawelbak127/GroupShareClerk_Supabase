@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import supabase from '../../../../../lib/supabase-client';
-import supabaseAdmin from '../../../../../lib/supabase-admin-client';
+import { getOrCreateUserProfile } from '../../../../../lib/auth-service';
 
 /**
  * POST /api/offers/[id]/purchase
@@ -20,56 +20,14 @@ export async function POST(request, { params }) {
       );
     }
     
-    console.log("Przetwarzanie zakupu dla użytkownika:", user.id);
+    // Pobierz lub utwórz profil użytkownika za pomocą standardowej funkcji
+    const userProfile = await getOrCreateUserProfile();
     
-    // Pobierz lub utwórz profil użytkownika BEZPOŚREDNIO
-    let userProfileId;
-    
-    // 1. Najpierw spróbuj znaleźć istniejący profil
-    const { data: existingProfile, error: profileError } = await supabaseAdmin
-      .from('user_profiles')
-      .select('id')
-      .eq('external_auth_id', user.id)
-      .single();
-    
-    if (!profileError && existingProfile) {
-      console.log("Znaleziono istniejący profil:", existingProfile.id);
-      userProfileId = existingProfile.id;
-    } else {
-      // 2. Jeśli nie ma profilu, utwórz nowy
-      console.log("Tworzenie nowego profilu dla użytkownika:", user.id);
-      
-      const newProfile = {
-        external_auth_id: user.id,
-        display_name: user.firstName 
-          ? `${user.firstName} ${user.lastName || ''}`.trim() 
-          : (user.username || 'Nowy użytkownik'),
-        email: user.emailAddresses[0]?.emailAddress || '',
-        phone_number: user.phoneNumbers[0]?.phoneNumber || null,
-        profile_type: 'both', // Domyślna wartość
-        verification_level: 'basic', // Domyślna wartość
-        bio: '',
-        avatar_url: user.imageUrl || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      const { data: createdProfile, error: createError } = await supabaseAdmin
-        .from('user_profiles')
-        .insert([newProfile])
-        .select('id')
-        .single();
-      
-      if (createError) {
-        console.error('Error creating user profile:', createError);
-        return NextResponse.json(
-          { error: 'Failed to create user profile', details: createError },
-          { status: 500 }
-        );
-      }
-      
-      console.log("Profil utworzony pomyślnie:", createdProfile.id);
-      userProfileId = createdProfile.id;
+    if (!userProfile) {
+      return NextResponse.json(
+        { error: 'Failed to get or create user profile' },
+        { status: 500 }
+      );
     }
     
     // Sprawdź ofertę i dostępność miejsc
@@ -95,11 +53,11 @@ export async function POST(request, { params }) {
       );
     }
     
-    // Utwórz rekord zakupu używając supabaseAdmin, aby ominąć RLS
-    const { data: purchase, error: purchaseError } = await supabaseAdmin
+    // Utwórz rekord zakupu
+    const { data: purchase, error: purchaseError } = await supabase
       .from('purchase_records')
       .insert({
-        user_id: userProfileId,
+        user_id: userProfile.id,
         group_sub_id: id,
         status: 'pending_payment'
       })
@@ -114,7 +72,6 @@ export async function POST(request, { params }) {
       );
     }
     
-    console.log("Zakup zainicjowany pomyślnie:", purchase.id);
     return NextResponse.json({ purchase }, { status: 201 });
   } catch (error) {
     console.error('Error initiating purchase:', error);

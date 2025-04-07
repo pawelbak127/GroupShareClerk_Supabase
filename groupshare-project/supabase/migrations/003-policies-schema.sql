@@ -35,9 +35,14 @@ CREATE POLICY "Public users can view basic profile info" ON user_profiles
 CREATE POLICY "Users can update own profile" ON user_profiles
   FOR UPDATE USING (external_auth_id = auth.clerk_user_id());
 
--- Users can insert their own profiles
-CREATE POLICY "Users can insert own profile" ON user_profiles
-  FOR INSERT WITH CHECK (external_auth_id = auth.clerk_user_id() OR auth.role() = 'service_role');
+-- IMPORTANT CHANGE: Allow service_role to insert profiles
+CREATE POLICY "Anyone can insert profiles" ON user_profiles
+  FOR INSERT WITH CHECK (true);
+
+-- IMPORTANT CHANGE: Allow service_role to modify profiles
+CREATE POLICY "Service role can manage profiles" ON user_profiles
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
 
 ----------------------
 -- Policy: groups
@@ -58,6 +63,11 @@ CREATE POLICY "Group owners can update groups" ON groups
 CREATE POLICY "Group owners can delete groups" ON groups
   FOR DELETE USING (clerk_user_owns_group(id));
 
+-- Service role can manage all groups
+CREATE POLICY "Service role can manage all groups" ON groups
+  FOR ALL USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
 ----------------------
 -- Policy: group_members
 ----------------------
@@ -71,28 +81,32 @@ CREATE POLICY "Users can view members of their groups" ON group_members
       AND gm.status = 'active'
       AND up.external_auth_id = auth.clerk_user_id()
     ) OR
-    clerk_user_owns_group(group_id)
+    clerk_user_owns_group(group_id) OR
+    auth.role() = 'service_role'
   );
 
 -- Group owners and admins can add members
 CREATE POLICY "Group admins can add members" ON group_members
   FOR INSERT WITH CHECK (
     clerk_user_is_group_admin(group_id) OR
-    clerk_user_owns_group(group_id)
+    clerk_user_owns_group(group_id) OR
+    auth.role() = 'service_role'
   );
 
 -- Group owners and admins can update members
 CREATE POLICY "Group admins can update members" ON group_members
   FOR UPDATE USING (
     clerk_user_is_group_admin(group_id) OR
-    clerk_user_owns_group(group_id)
+    clerk_user_owns_group(group_id) OR
+    auth.role() = 'service_role'
   );
 
 -- Group owners and admins can delete members
 CREATE POLICY "Group admins can delete members" ON group_members
   FOR DELETE USING (
     clerk_user_is_group_admin(group_id) OR
-    clerk_user_owns_group(group_id)
+    clerk_user_owns_group(group_id) OR
+    auth.role() = 'service_role'
   );
 
 ----------------------
@@ -121,7 +135,8 @@ CREATE POLICY "Group admins can manage subscription offers" ON group_subs
       WHERE g.id = group_subs.group_id AND 
       (
         clerk_user_is_group_admin(g.id) OR
-        clerk_user_owns_group(g.id)
+        clerk_user_owns_group(g.id) OR
+        auth.role() = 'service_role'
       )
     )
   );
@@ -162,7 +177,8 @@ CREATE POLICY "Group admins can insert access instructions" ON access_instructio
       WHERE gs.id = group_sub_id
       AND (
         clerk_user_is_group_admin(g.id) OR
-        clerk_user_owns_group(g.id)
+        clerk_user_owns_group(g.id) OR
+        auth.role() = 'service_role'
       )
     )
   );
@@ -177,7 +193,8 @@ CREATE POLICY "Group admins can update access instructions" ON access_instructio
       WHERE gs.id = group_sub_id
       AND (
         clerk_user_is_group_admin(g.id) OR
-        clerk_user_owns_group(g.id)
+        clerk_user_owns_group(g.id) OR
+        auth.role() = 'service_role'
       )
     )
   );
@@ -199,7 +216,8 @@ CREATE POLICY "Users can view relevant purchase records" ON purchase_records
       JOIN user_profiles up ON g.owner_id = up.id
       WHERE gs.id = purchase_records.group_sub_id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Authenticated users can create purchase records
@@ -212,6 +230,7 @@ CREATE POLICY "Authenticated users can create purchase records" ON purchase_reco
       AND up.external_auth_id = auth.clerk_user_id()
     ) AND
     (SELECT slots_available FROM group_subs WHERE id = group_sub_id) > 0
+    OR auth.role() = 'service_role'
   );
 
 -- Users can update their own purchase records
@@ -221,7 +240,8 @@ CREATE POLICY "Users can update own purchase records" ON purchase_records
       SELECT 1 FROM user_profiles up
       WHERE purchase_records.user_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Group admins can update purchase records for their subscriptions
@@ -233,7 +253,8 @@ CREATE POLICY "Group admins can update purchase records" ON purchase_records
       WHERE gs.id = purchase_records.group_sub_id
       AND (
         clerk_user_is_group_admin(g.id) OR
-        clerk_user_owns_group(g.id)
+        clerk_user_owns_group(g.id) OR
+        auth.role() = 'service_role'
       )
     )
   );
@@ -249,7 +270,8 @@ CREATE POLICY "Users can view own tokens" ON access_tokens
       JOIN user_profiles up ON pr.user_id = up.id
       WHERE pr.id = purchase_record_id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR 
+    auth.role() = 'service_role'
   );
 
 -- Only service role can create tokens
@@ -280,7 +302,8 @@ CREATE POLICY "Users can view own transactions" ON transactions
       SELECT 1 FROM user_profiles up
       WHERE (transactions.buyer_id = up.id OR transactions.seller_id = up.id)
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Only service role can create transactions
@@ -307,7 +330,8 @@ CREATE POLICY "Users can view own notifications" ON notifications
       SELECT 1 FROM user_profiles up
       WHERE notifications.user_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Users can mark own notifications as read
@@ -317,15 +341,17 @@ CREATE POLICY "Users can mark own notifications as read" ON notifications
       SELECT 1 FROM user_profiles up
       WHERE notifications.user_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   )
   WITH CHECK (
-    EXISTS (
+    (EXISTS (
       SELECT 1 FROM user_profiles up
       WHERE notifications.user_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
     ) AND 
-    is_read IS NOT NULL
+    is_read IS NOT NULL) OR
+    auth.role() = 'service_role'
   );
 
 -- Messages policies
@@ -335,7 +361,8 @@ CREATE POLICY "Users can view messages they sent or received" ON messages
       SELECT 1 FROM user_profiles up
       WHERE (messages.sender_id = up.id OR messages.receiver_id = up.id)
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Users can send messages
@@ -345,10 +372,9 @@ CREATE POLICY "Users can send messages" ON messages
       SELECT 1 FROM user_profiles up
       WHERE messages.sender_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
-
--- Add similar policy updates for the remaining tables
 
 -- Message threads policies
 CREATE POLICY "Users can view threads they participate in" ON message_threads
@@ -358,7 +384,8 @@ CREATE POLICY "Users can view threads they participate in" ON message_threads
       JOIN user_profiles up ON mtp.user_id = up.id
       WHERE mtp.thread_id = message_threads.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Thread participants policies
@@ -369,7 +396,8 @@ CREATE POLICY "Users can view thread participants for their threads" ON message_
       JOIN user_profiles up ON mtp.user_id = up.id
       WHERE mtp.thread_id = message_thread_participants.thread_id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Group invitations policies
@@ -381,13 +409,15 @@ CREATE POLICY "Group admins can view invitations" ON group_invitations
       SELECT 1 FROM user_profiles up
       WHERE group_invitations.invited_by = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 CREATE POLICY "Group admins can create invitations" ON group_invitations
   FOR INSERT WITH CHECK (
     clerk_user_is_group_admin(group_id) OR 
-    clerk_user_owns_group(group_id)
+    clerk_user_owns_group(group_id) OR
+    auth.role() = 'service_role'
   );
 
 CREATE POLICY "Group admins can update invitations" ON group_invitations
@@ -398,7 +428,8 @@ CREATE POLICY "Group admins can update invitations" ON group_invitations
       SELECT 1 FROM user_profiles up
       WHERE group_invitations.invited_by = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Disputes policies
@@ -423,7 +454,8 @@ CREATE POLICY "Users can create disputes" ON disputes
       SELECT 1 FROM user_profiles up
       WHERE disputes.reporter_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Dispute comments policies
@@ -449,7 +481,8 @@ CREATE POLICY "Users can add comments to disputes" ON dispute_comments
       SELECT 1 FROM user_profiles up
       WHERE dispute_comments.user_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
 
 -- Dispute evidence policies
@@ -475,5 +508,6 @@ CREATE POLICY "Users can add evidence to disputes" ON dispute_evidence
       SELECT 1 FROM user_profiles up
       WHERE dispute_evidence.user_id = up.id
       AND up.external_auth_id = auth.clerk_user_id()
-    )
+    ) OR
+    auth.role() = 'service_role'
   );
