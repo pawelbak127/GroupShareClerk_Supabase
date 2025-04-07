@@ -1,8 +1,8 @@
-// src/app/api/offers/route.js
 import { NextResponse } from 'next/server';
-import { getSubscriptionOffers } from '../../../lib/supabase-client.js';
-import { currentUser } from '@clerk/nextjs/server';  
-
+import { currentUser } from '@clerk/nextjs/server';
+import { getCurrentUserProfile } from '@/lib/auth-service';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
+import { getSubscriptionOffers } from '@/lib/supabase-client';
 
 /**
  * GET /api/offers
@@ -54,6 +54,9 @@ export async function POST(request) {
       );
     }
     
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+    
     // Parse request body
     const body = await request.json();
     
@@ -83,80 +86,10 @@ export async function POST(request) {
       );
     }
     
-    // Get user profile ID from Supabase
-    let userProfileResponse;
-    try {
-      userProfileResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/profile`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            // Clerk zapewni autentykację
-          }
-        }
-      );
-      
-      if (!userProfileResponse.ok) {
-        throw new Error(`Failed to fetch user profile: ${userProfileResponse.status}`);
-      }
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-      return NextResponse.json(
-        { error: 'Failed to verify user profile' },
-        { status: 500 }
-      );
-    }
+    // Verify user is the owner or admin of the group using RLS
+    // Since we're using authenticated Supabase client, policies will enforce this
     
-    const userProfile = await userProfileResponse.json();
-    if (!userProfile || !userProfile.id) {
-      return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Verify user is the owner or admin of the group
-    let groupMembershipResponse;
-    try {
-      groupMembershipResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/groups/${body.groupId}/members?userId=${userProfile.id}`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            // Clerk zapewni autentykację
-          }
-        }
-      );
-      
-      if (!groupMembershipResponse.ok) {
-        if (groupMembershipResponse.status === 404) {
-          return NextResponse.json(
-            { error: 'Group not found' },
-            { status: 404 }
-          );
-        } else {
-          throw new Error(`Failed to verify group membership: ${groupMembershipResponse.status}`);
-        }
-      }
-    } catch (error) {
-      console.error('Error verifying group membership:', error);
-      return NextResponse.json(
-        { error: 'Failed to verify group membership' },
-        { status: 500 }
-      );
-    }
-    
-    const groupMembership = await groupMembershipResponse.json();
-    if (!groupMembership || (groupMembership.role !== 'admin' && !groupMembership.isOwner)) {
-      return NextResponse.json(
-        { error: 'You do not have permission to create offers for this group' },
-        { status: 403 }
-      );
-    }
-    
-    // Przygotowanie danych oferty
+    // Prepare the offer data
     const offerData = {
       group_id: body.groupId,
       platform_id: body.platformId,
@@ -165,56 +98,38 @@ export async function POST(request) {
       slots_available: body.slotsTotal,
       price_per_slot: body.pricePerSlot,
       currency: body.currency || 'PLN',
-      instant_access: true // Wszystkie oferty mają teraz natychmiastowy dostęp
+      instant_access: true // All offers now have instant access
     };
     
-    // Tworzenie oferty w Supabase
-    let response;
-    try {
-      response = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/supabase/group_subs`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${await user.getToken()}`
-          },
-          body: JSON.stringify(offerData)
-        }
-      );
+    // Create the offer in Supabase
+    const { data: createdOffer, error } = await supabaseAuth
+      .from('group_subs')
+      .insert(offerData)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating offer:', error);
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Failed to create offer:', errorData);
-        
-        if (response.status === 403) {
-          return NextResponse.json(
-            { error: 'You do not have permission to create offers for this group' },
-            { status: 403 }
-          );
-        } else if (response.status === 400) {
-          return NextResponse.json(
-            { error: errorData.error || 'Invalid offer data' },
-            { status: 400 }
-          );
-        } else {
-          return NextResponse.json(
-            { error: errorData.error || 'Failed to create subscription offer' },
-            { status: response.status || 500 }
-          );
-        }
+      if (error.code === '42501') {
+        return NextResponse.json(
+          { error: 'You do not have permission to create offers for this group' },
+          { status: 403 }
+        );
+      } else if (error.code === '23503') {
+        return NextResponse.json(
+          { error: 'Group or platform not found' },
+          { status: 400 }
+        );
+      } else {
+        return NextResponse.json(
+          { error: error.message || 'Failed to create subscription offer' },
+          { status: 500 }
+        );
       }
-    } catch (error) {
-      console.error('Error creating offer in Supabase:', error);
-      return NextResponse.json(
-        { error: 'Failed to create subscription offer in database' },
-        { status: 500 }
-      );
     }
     
-    const createdOffer = await response.json();
-    
-    // Sprawdzenie wyniku
+    // Check result
     if (!createdOffer || !createdOffer.id) {
       console.warn('Offer creation response missing ID');
       return NextResponse.json(
@@ -223,33 +138,21 @@ export async function POST(request) {
       );
     }
     
-    // Store access instructions in Supabase
+    // Store access instructions
     try {
-      const instructionsResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_APP_URL}/api/access-instructions`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${await user.getToken()}`
-          },
-          body: JSON.stringify({
-            groupSubId: createdOffer.id,
-            instructions: body.accessInstructions
-          })
-        }
-      );
+      const instructionsResponse = await supabaseAuth
+        .from('access_instructions')
+        .insert({
+          group_sub_id: createdOffer.id,
+          instructions: body.accessInstructions,
+          updated_at: new Date().toISOString()
+        });
       
-      if (!instructionsResponse.ok) {
-        const errorData = await instructionsResponse.json();
-        console.error('Failed to save access instructions:', errorData);
-        
-        // Don't fail the entire operation, but log the error
-        // Could clean up the created offer, but it's still usable
+      if (instructionsResponse.error) {
+        console.error('Failed to save access instructions:', instructionsResponse.error);
       }
     } catch (error) {
       console.error('Error saving access instructions:', error);
-      // Don't fail the entire operation
     }
     
     return NextResponse.json(createdOffer, { status: 201 });

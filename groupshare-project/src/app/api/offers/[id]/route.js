@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import supabase from '@/lib/supabase-client';
-import { createClient } from '@supabase/supabase-js';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
 
 /**
  * GET /api/offers/[id]
@@ -18,8 +17,13 @@ export async function GET(request, { params }) {
       );
     }
 
-    // Używając standardowego klienta supabase, bo nie potrzebujemy autoryzacji dla tego endpointu
-    const { data: offer, error } = await supabase
+    // Using standard supabase client for public data
+    const user = await currentUser();
+    const supabaseClient = user 
+      ? await getAuthenticatedSupabaseClient(user) 
+      : supabase;
+
+    const { data: offer, error } = await supabaseClient
       .from('group_subs')
       .select(`
         *,
@@ -74,24 +78,11 @@ export async function PATCH(request, { params }) {
     // Parse request body
     const updates = await request.json();
 
-    // Pobierz token z Clerk
-    const clerkToken = await user.getToken();
+    // Get authenticated Supabase client
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
 
-    // Stwórz autoryzowany klient Supabase używając tokenu Clerk
-    const supabaseWithAuth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${clerkToken}`
-          }
-        }
-      }
-    );
-
-    // Pobierz oryginalną ofertę i sprawdź, czy użytkownik ma uprawnienia
-    const { data: offer, error: offerError } = await supabaseWithAuth
+    // Get original offer to check permissions
+    const { data: offer, error: offerError } = await supabaseAuth
       .from('group_subs')
       .select(`
         *,
@@ -108,18 +99,18 @@ export async function PATCH(request, { params }) {
       );
     }
     
-    // Przygotuj dane do aktualizacji
+    // Prepare update data
     const updateData = {
       status: updates.status || offer.status,
       price_per_slot: updates.pricePerSlot || offer.price_per_slot,
       slots_total: updates.slotsTotal || offer.slots_total,
       slots_available: updates.slotsAvailable !== undefined ? updates.slotsAvailable : offer.slots_available,
       currency: updates.currency || offer.currency,
-      instant_access: true // Zawsze true w nowym modelu
+      instant_access: true // Always true in new model
     };
 
-    // Aktualizuj ofertę z autoryzowanym klientem
-    const { data: updatedOffer, error: updateError } = await supabaseWithAuth
+    // Update offer with authenticated client
+    const { data: updatedOffer, error: updateError } = await supabaseAuth
       .from('group_subs')
       .update(updateData)
       .eq('id', id)
@@ -133,9 +124,9 @@ export async function PATCH(request, { params }) {
       );
     }
 
-    // Jeśli podano instrukcje dostępu, aktualizuj je
+    // Optional: Update access instructions if provided
     if (updates.accessInstructions) {
-      const { error: instructionsError } = await supabaseWithAuth
+      const { error: instructionsError } = await supabaseAuth
         .from('access_instructions')
         .upsert({
           group_sub_id: id,
@@ -147,7 +138,6 @@ export async function PATCH(request, { params }) {
 
       if (instructionsError) {
         console.warn('Error updating access instructions:', instructionsError);
-        // Kontynuujemy pomimo błędu, ponieważ główna aktualizacja się powiodła
       }
     }
 
@@ -185,24 +175,11 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    // Pobierz token z Clerk
-    const clerkToken = await user.getToken();
+    // Get authenticated Supabase client
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
 
-    // Stwórz autoryzowany klient Supabase używając tokenu Clerk
-    const supabaseWithAuth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${clerkToken}`
-          }
-        }
-      }
-    );
-
-    // Pobierz ofertę i sprawdź, czy użytkownik ma uprawnienia (RLS w Supabase sprawdzi to automatycznie)
-    const { data: offer, error: offerError } = await supabaseWithAuth
+    // Verify access rights through RLS
+    const { data: offer, error: offerError } = await supabaseAuth
       .from('group_subs')
       .select(`
         *,
@@ -219,8 +196,8 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    // Usuń ofertę z autoryzowanym klientem
-    const { error: deleteError } = await supabaseWithAuth
+    // Delete the offer with authenticated client
+    const { error: deleteError } = await supabaseAuth
       .from('group_subs')
       .delete()
       .eq('id', id);

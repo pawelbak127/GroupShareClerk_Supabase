@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
+import { getCurrentUserProfile } from '@/lib/auth-service';
 import { 
   KeyManagementService, 
   InstructionEncryptionService,
   SecurityLogger 
 } from '@/lib/security';
-import supabase from '@/lib/supabase-client';
 
 /**
  * POST /api/access-instructions
@@ -22,6 +23,10 @@ export async function POST(request) {
       );
     }
 
+    // Get authenticated Supabase client
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+
     // Parsuj dane żądania
     const body = await request.json();
     const { groupSubId, instructions } = body;
@@ -34,7 +39,7 @@ export async function POST(request) {
     }
 
     // Sprawdź, czy użytkownik ma uprawnienia do tej oferty
-    const { data: offer, error: offerError } = await supabase
+    const { data: offer, error: offerError } = await supabaseAuth
       .from('group_subs')
       .select(`
         groups!inner(owner_id)
@@ -58,7 +63,7 @@ export async function POST(request) {
     }
 
     // Sprawdź, czy użytkownik jest właścicielem grupy
-    if (offer.groups.owner_id !== user.id) {
+    if (offer.groups.owner_id !== profile.id) {
       return NextResponse.json(
         { error: 'You do not have permission to add instructions to this offer' },
         { status: 403 }
@@ -69,11 +74,11 @@ export async function POST(request) {
     const masterKey = process.env.ENCRYPTION_MASTER_KEY;
     const kms = new KeyManagementService(masterKey);
     const encryptionService = new InstructionEncryptionService(kms);
-    const securityLogger = new SecurityLogger(user.id);
+    const securityLogger = new SecurityLogger(profile.id);
 
     // Pobierz lub wygeneruj klucz dla grupy
     let keyId;
-    const { data: existingKey, error: keyError } = await supabase
+    const { data: existingKey, error: keyError } = await supabaseAuth
       .from('encryption_keys')
       .select('id')
       .eq('key_type', 'group')
@@ -146,7 +151,7 @@ export async function POST(request) {
     }
 
     // Zapisz zaszyfrowane instrukcje
-    const { data: savedData, error: saveError } = await supabase
+    const { data: savedData, error: saveError } = await supabaseAuth
       .from('access_instructions')
       .upsert({
         group_sub_id: groupSubId,
@@ -208,7 +213,7 @@ export async function POST(request) {
     }
 
     // Zaktualizuj flagę instant_access w ofercie
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAuth
       .from('group_subs')
       .update({ instant_access: true })
       .eq('id', groupSubId);

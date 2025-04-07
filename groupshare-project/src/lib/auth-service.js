@@ -1,6 +1,7 @@
-import { currentUser, auth } from '@clerk/nextjs/server';
+import { currentUser } from '@clerk/nextjs/server';
 import supabase from './supabase-client';
 import supabaseAdmin from './supabase-admin-client';
+import { getAuthenticatedSupabaseClient } from './clerk-supabase';
 
 /**
  * Pobiera aktualny profil użytkownika z bazy danych
@@ -10,7 +11,9 @@ export async function getCurrentUserProfile() {
   
   if (!user) return null;
   
-  const { data, error } = await supabase
+  const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+  
+  const { data, error } = await supabaseAuth
     .from('user_profiles')
     .select('*')
     .eq('external_auth_id', user.id)
@@ -73,14 +76,19 @@ export async function getOrCreateUserProfile() {
  * Sprawdza, czy użytkownik jest właścicielem grupy
  */
 export async function isGroupOwner(groupId) {
-  const profile = await getCurrentUserProfile();
-  if (!profile) return false;
+  const user = await currentUser();
+  if (!user) return false;
   
-  const { data } = await supabase
+  const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+  
+  const { data } = await supabaseAuth
     .from('groups')
     .select('owner_id')
     .eq('id', groupId)
     .single();
+  
+  const profile = await getCurrentUserProfile();
+  if (!profile) return false;
   
   return data?.owner_id === profile.id;
 }
@@ -89,14 +97,18 @@ export async function isGroupOwner(groupId) {
  * Sprawdza, czy użytkownik jest administratorem grupy
  */
 export async function isGroupAdmin(groupId) {
-  const profile = await getCurrentUserProfile();
-  if (!profile) return false;
-  
   // Sprawdzenie, czy jest właścicielem
   if (await isGroupOwner(groupId)) return true;
   
+  const user = await currentUser();
+  if (!user) return false;
+  
+  const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+  const profile = await getCurrentUserProfile();
+  if (!profile) return false;
+  
   // Sprawdzenie, czy jest adminem
-  const { data } = await supabase
+  const { data } = await supabaseAuth
     .from('group_members')
     .select('role')
     .eq('group_id', groupId)
@@ -111,10 +123,12 @@ export async function isGroupAdmin(groupId) {
  * Sprawdza, czy użytkownik ma uprawnienia do oferty subskrypcji
  */
 export async function hasSubscriptionOfferAccess(offerId) {
-  const profile = await getCurrentUserProfile();
-  if (!profile) return false;
+  const user = await currentUser();
+  if (!user) return false;
   
-  const { data: offer } = await supabase
+  const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+  
+  const { data: offer } = await supabaseAuth
     .from('group_subs')
     .select('group_id')
     .eq('id', offerId)
@@ -132,31 +146,16 @@ export async function isPurchaseOwner(purchaseId) {
   const profile = await getCurrentUserProfile();
   if (!profile) return false;
   
-  const { data } = await supabase
+  const user = await currentUser();
+  if (!user) return false;
+  
+  const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+  
+  const { data } = await supabaseAuth
     .from('purchase_records')
     .select('user_id')
     .eq('id', purchaseId)
     .single();
   
   return data?.user_id === profile.id;
-}
-
-/**
- * Wykonuje uwierzytelnione zapytanie HTTP (gdyby było potrzebne)
- */
-export async function authenticatedFetch(url, options = {}) {
-  try {
-    const user = await currentUser();
-    if (!user) {
-      throw new Error('Unauthorized');
-    }
-    
-    // W nowym modelu integracji, nie potrzebujemy dodawać tokenu
-    // JWT jest już obsługiwany automatycznie
-    
-    return fetch(url, options);
-  } catch (error) {
-    console.error('Error in authenticatedFetch:', error);
-    throw error;
-  }
 }

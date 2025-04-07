@@ -2,7 +2,7 @@
 
 import { useState, useEffect, createContext, useContext } from 'react';
 import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createSupabaseClient } from '../lib/supabase-client';
 
 const AuthContext = createContext(null);
 
@@ -11,10 +11,35 @@ export function AuthProvider({ children }) {
   const { user } = useUser();
   const [profile, setProfile] = useState(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const supabase = createClientComponentClient();
+  const [supabase, setSupabase] = useState(null);
+  const [clerkToken, setClerkToken] = useState(null);
 
+  // Get Clerk token when user is signed in
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) {
+    async function getToken() {
+      if (isSignedIn && user) {
+        try {
+          const token = await user.getToken({ template: "supabase" });
+          setClerkToken(token);
+        } catch (error) {
+          console.error('Error getting Clerk token:', error);
+        }
+      } else {
+        setClerkToken(null);
+      }
+    }
+    
+    getToken();
+  }, [isSignedIn, user]);
+
+  // Create Supabase client with Clerk token
+  useEffect(() => {
+    setSupabase(createSupabaseClient(clerkToken));
+  }, [clerkToken]);
+
+  // Fetch user profile
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || !supabase) {
       setProfile(null);
       setIsLoadingProfile(false);
       return;
@@ -39,7 +64,7 @@ export function AuthProvider({ children }) {
     };
 
     fetchProfile();
-  }, [isSignedIn, isLoaded, user?.id]);
+  }, [isSignedIn, isLoaded, user?.id, supabase]);
 
   return (
     <AuthContext.Provider 
@@ -47,7 +72,8 @@ export function AuthProvider({ children }) {
         clerkUser: user, 
         profile, 
         isLoaded, 
-        isSignedIn, 
+        isSignedIn,
+        clerkToken,
         isLoadingProfile,
         isLoading: isLoadingProfile || !isLoaded,
         supabase

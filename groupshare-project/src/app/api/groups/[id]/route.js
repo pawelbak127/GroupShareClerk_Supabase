@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import supabase from '../../../../lib/supabase-client';
+import { getCurrentUserProfile } from '@/lib/auth-service';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
 
 /**
  * GET /api/groups/[id]
@@ -19,8 +20,11 @@ export async function GET(request, { params }) {
       );
     }
 
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+
     // Pobierz szczegóły grupy
-    const { data: group, error: groupError } = await supabase
+    const { data: group, error: groupError } = await supabaseAuth
       .from('groups')
       .select(`
         *,
@@ -41,11 +45,11 @@ export async function GET(request, { params }) {
     }
 
     // Sprawdź, czy użytkownik jest członkiem grupy
-    const { data: membership, error: membershipError } = await supabase
+    const { data: membership, error: membershipError } = await supabaseAuth
       .from('group_members')
       .select('role, status')
       .eq('group_id', id)
-      .eq('user_id', user.id)
+      .eq('user_id', profile.id)
       .single();
 
     if (membershipError) {
@@ -56,7 +60,7 @@ export async function GET(request, { params }) {
     }
 
     // Pobierz wszystkich członków grupy
-    const { data: members, error: membersError } = await supabase
+    const { data: members, error: membersError } = await supabaseAuth
       .from('group_members')
       .select(`
         id,
@@ -78,7 +82,7 @@ export async function GET(request, { params }) {
     }
 
     // Pobierz subskrypcje grupy
-    const { data: subscriptions, error: subscriptionsError } = await supabase
+    const { data: subscriptions, error: subscriptionsError } = await supabaseAuth
       .from('group_subs')
       .select(`
         id,
@@ -110,7 +114,7 @@ export async function GET(request, { params }) {
       members: members || [],
       subscriptions: subscriptions || [],
       userRole: membership.role,
-      isOwner: group.owner_id === user.id
+      isOwner: group.owner_id === profile.id
     });
   } catch (error) {
     console.error('Error in group details API:', error);
@@ -138,8 +142,11 @@ export async function PATCH(request, { params }) {
       );
     }
 
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+
     // Pobierz grupę, aby sprawdzić uprawnienia
-    const { data: group, error: groupError } = await supabase
+    const { data: group, error: groupError } = await supabaseAuth
       .from('groups')
       .select('owner_id')
       .eq('id', id)
@@ -153,7 +160,7 @@ export async function PATCH(request, { params }) {
     }
 
     // Sprawdź, czy użytkownik jest właścicielem grupy
-    if (group.owner_id !== user.id) {
+    if (group.owner_id !== profile.id) {
       return NextResponse.json(
         { error: 'You do not have permission to update this group' },
         { status: 403 }
@@ -170,7 +177,7 @@ export async function PATCH(request, { params }) {
     updates.updated_at = new Date().toISOString();
 
     // Aktualizuj grupę
-    const { data: updatedGroup, error: updateError } = await supabase
+    const { data: updatedGroup, error: updateError } = await supabaseAuth
       .from('groups')
       .update(updates)
       .eq('id', id)
@@ -212,8 +219,11 @@ export async function DELETE(request, { params }) {
       );
     }
 
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+
     // Pobierz grupę, aby sprawdzić uprawnienia
-    const { data: group, error: groupError } = await supabase
+    const { data: group, error: groupError } = await supabaseAuth
       .from('groups')
       .select('owner_id')
       .eq('id', id)
@@ -227,7 +237,7 @@ export async function DELETE(request, { params }) {
     }
 
     // Sprawdź, czy użytkownik jest właścicielem grupy
-    if (group.owner_id !== user.id) {
+    if (group.owner_id !== profile.id) {
       return NextResponse.json(
         { error: 'You do not have permission to delete this group' },
         { status: 403 }
@@ -235,7 +245,7 @@ export async function DELETE(request, { params }) {
     }
 
     // Usuń grupę
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAuth
       .from('groups')
       .delete()
       .eq('id', id);

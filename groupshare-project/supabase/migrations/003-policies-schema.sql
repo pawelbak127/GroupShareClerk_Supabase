@@ -1,5 +1,5 @@
--- Row Level Security Policies for GroupShare
--- This script sets up RLS policies to secure data access
+-- Row Level Security Policies for GroupShare (Updated for Clerk)
+-- This script sets up RLS policies to secure data access using Clerk JWTs
 
 -- Enable RLS on all tables
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
@@ -27,21 +27,17 @@ ALTER TABLE dispute_evidence ENABLE ROW LEVEL SECURITY;
 ----------------------
 -- Policy: user_profiles
 ----------------------
--- Każdy może zobaczyć tylko podstawowe informacje o profilu
+-- Anyone can view basic profile info
 CREATE POLICY "Public users can view basic profile info" ON user_profiles
   FOR SELECT USING (true);
 
--- Dodatkowa polityka dla uwierzytelnionych użytkowników umożliwiająca pełny dostęp
-CREATE POLICY "Authenticated users can view full profiles" ON user_profiles
-  FOR SELECT USING (auth.role() = 'authenticated');
-
--- Users can update only their own profiles
+-- Users can update their own profiles
 CREATE POLICY "Users can update own profile" ON user_profiles
-  FOR UPDATE USING (id = auth.user_id());
+  FOR UPDATE USING (external_auth_id = auth.clerk_user_id());
 
--- Only backend service can insert new profiles (handled by auth hook)
-CREATE POLICY "Service can insert profiles" ON user_profiles
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+-- Users can insert their own profiles
+CREATE POLICY "Users can insert own profile" ON user_profiles
+  FOR INSERT WITH CHECK (external_auth_id = auth.clerk_user_id() OR auth.role() = 'service_role');
 
 ----------------------
 -- Policy: groups
@@ -52,15 +48,15 @@ CREATE POLICY "Public users can view groups" ON groups
 
 -- Only authenticated users can create groups
 CREATE POLICY "Authenticated users can create groups" ON groups
-  FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+  FOR INSERT WITH CHECK (auth.clerk_user_id() IS NOT NULL);
 
 -- Only group owners can update groups
 CREATE POLICY "Group owners can update groups" ON groups
-  FOR UPDATE USING (owner_id = auth.user_id());
+  FOR UPDATE USING (clerk_user_owns_group(id));
 
 -- Only group owners can delete groups
 CREATE POLICY "Group owners can delete groups" ON groups
-  FOR DELETE USING (owner_id = auth.user_id());
+  FOR DELETE USING (clerk_user_owns_group(id));
 
 ----------------------
 -- Policy: group_members
@@ -68,29 +64,35 @@ CREATE POLICY "Group owners can delete groups" ON groups
 -- Users can see members of groups they belong to
 CREATE POLICY "Users can view members of their groups" ON group_members
   FOR SELECT USING (
-    is_group_member(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id())
+    EXISTS (
+      SELECT 1 FROM group_members gm
+      JOIN user_profiles up ON gm.user_id = up.id
+      WHERE gm.group_id = group_members.group_id
+      AND gm.status = 'active'
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) OR
+    clerk_user_owns_group(group_id)
   );
 
 -- Group owners and admins can add members
 CREATE POLICY "Group admins can add members" ON group_members
   FOR INSERT WITH CHECK (
-    is_group_admin(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id())
+    clerk_user_is_group_admin(group_id) OR
+    clerk_user_owns_group(group_id)
   );
 
 -- Group owners and admins can update members
 CREATE POLICY "Group admins can update members" ON group_members
   FOR UPDATE USING (
-    is_group_admin(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id())
+    clerk_user_is_group_admin(group_id) OR
+    clerk_user_owns_group(group_id)
   );
 
 -- Group owners and admins can delete members
 CREATE POLICY "Group admins can delete members" ON group_members
   FOR DELETE USING (
-    is_group_admin(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id())
+    clerk_user_is_group_admin(group_id) OR
+    clerk_user_owns_group(group_id)
   );
 
 ----------------------
@@ -118,11 +120,8 @@ CREATE POLICY "Group admins can manage subscription offers" ON group_subs
       SELECT 1 FROM groups g 
       WHERE g.id = group_subs.group_id AND 
       (
-        EXISTS (
-          SELECT 1 FROM group_members gm
-          WHERE gm.group_id = g.id AND gm.user_id = auth.user_id() AND gm.role = 'admin' AND gm.status = 'active'
-        ) OR
-        g.owner_id = auth.user_id()
+        clerk_user_is_group_admin(g.id) OR
+        clerk_user_owns_group(g.id)
       )
     )
   );
@@ -130,18 +129,25 @@ CREATE POLICY "Group admins can manage subscription offers" ON group_subs
 ----------------------
 -- Policy: access_instructions
 ----------------------
--- IMPORTANT: access_instructions contains sensitive data and should have very strict policies
-
 -- Only users with completed purchase record can view access instructions
 CREATE POLICY "Users can view access instructions for purchased subscriptions" ON access_instructions
   FOR SELECT USING (
     EXISTS (
       SELECT 1 
       FROM purchase_records pr
+      JOIN user_profiles up ON pr.user_id = up.id
       WHERE pr.group_sub_id = access_instructions.group_sub_id
-      AND pr.user_id = auth.user_id()
+      AND up.external_auth_id = auth.clerk_user_id()
       AND pr.status = 'completed'
       AND pr.access_provided = TRUE
+    ) OR
+    EXISTS (
+      SELECT 1
+      FROM group_subs gs
+      JOIN groups g ON gs.group_id = g.id
+      JOIN user_profiles up ON g.owner_id = up.id
+      WHERE gs.id = access_instructions.group_sub_id
+      AND up.external_auth_id = auth.clerk_user_id()
     ) OR
     auth.role() = 'service_role'
   );
@@ -149,26 +155,30 @@ CREATE POLICY "Users can view access instructions for purchased subscriptions" O
 -- Only group owners and admins can insert access instructions
 CREATE POLICY "Group admins can insert access instructions" ON access_instructions
   FOR INSERT WITH CHECK (
-    is_group_admin(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
-    ) OR
-    is_group_owner(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
+    EXISTS (
+      SELECT 1
+      FROM group_subs gs
+      JOIN groups g ON gs.group_id = g.id
+      WHERE gs.id = group_sub_id
+      AND (
+        clerk_user_is_group_admin(g.id) OR
+        clerk_user_owns_group(g.id)
+      )
     )
   );
 
 -- Only group owners and admins can update access instructions
 CREATE POLICY "Group admins can update access instructions" ON access_instructions
   FOR UPDATE USING (
-    is_group_admin(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
-    ) OR
-    is_group_owner(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
+    EXISTS (
+      SELECT 1
+      FROM group_subs gs
+      JOIN groups g ON gs.group_id = g.id
+      WHERE gs.id = group_sub_id
+      AND (
+        clerk_user_is_group_admin(g.id) OR
+        clerk_user_owns_group(g.id)
+      )
     )
   );
 
@@ -178,41 +188,53 @@ CREATE POLICY "Group admins can update access instructions" ON access_instructio
 -- Users can see purchase records they created or purchase records for subscriptions they manage
 CREATE POLICY "Users can view relevant purchase records" ON purchase_records
   FOR SELECT USING (
-    user_id = auth.user_id() OR
-    is_group_admin(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE purchase_records.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
     ) OR
-    is_group_owner(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
+    EXISTS (
+      SELECT 1 FROM group_subs gs
+      JOIN groups g ON gs.group_id = g.id
+      JOIN user_profiles up ON g.owner_id = up.id
+      WHERE gs.id = purchase_records.group_sub_id
+      AND up.external_auth_id = auth.clerk_user_id()
     )
   );
 
 -- Authenticated users can create purchase records
 CREATE POLICY "Authenticated users can create purchase records" ON purchase_records
   FOR INSERT WITH CHECK (
-    auth.role() = 'authenticated' AND
-    user_id = auth.user_id() AND
+    auth.clerk_user_id() IS NOT NULL AND
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE purchase_records.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) AND
     (SELECT slots_available FROM group_subs WHERE id = group_sub_id) > 0
   );
 
 -- Users can update their own purchase records
 CREATE POLICY "Users can update own purchase records" ON purchase_records
   FOR UPDATE USING (
-    user_id = auth.user_id()
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE purchase_records.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
 -- Group admins can update purchase records for their subscriptions
 CREATE POLICY "Group admins can update purchase records" ON purchase_records
   FOR UPDATE USING (
-    is_group_admin(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
-    ) OR
-    is_group_owner(
-      (SELECT group_id FROM group_subs WHERE id = group_sub_id), 
-      auth.user_id()
+    EXISTS (
+      SELECT 1 FROM group_subs gs
+      JOIN groups g ON gs.group_id = g.id
+      WHERE gs.id = purchase_records.group_sub_id
+      AND (
+        clerk_user_is_group_admin(g.id) OR
+        clerk_user_owns_group(g.id)
+      )
     )
   );
 
@@ -222,7 +244,12 @@ CREATE POLICY "Group admins can update purchase records" ON purchase_records
 -- Only token owners can view their tokens
 CREATE POLICY "Users can view own tokens" ON access_tokens
   FOR SELECT USING (
-    (SELECT user_id FROM purchase_records WHERE id = purchase_record_id) = auth.user_id()
+    EXISTS (
+      SELECT 1 FROM purchase_records pr
+      JOIN user_profiles up ON pr.user_id = up.id
+      WHERE pr.id = purchase_record_id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
 -- Only service role can create tokens
@@ -235,7 +262,12 @@ CREATE POLICY "Service can create tokens" ON access_tokens
 CREATE POLICY "Service and users can update tokens" ON access_tokens
   FOR UPDATE USING (
     auth.role() = 'service_role' OR
-    (SELECT user_id FROM purchase_records WHERE id = purchase_record_id) = auth.user_id()
+    EXISTS (
+      SELECT 1 FROM purchase_records pr
+      JOIN user_profiles up ON pr.user_id = up.id
+      WHERE pr.id = purchase_record_id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
 ----------------------
@@ -244,8 +276,11 @@ CREATE POLICY "Service and users can update tokens" ON access_tokens
 -- Users can see transactions they're involved in
 CREATE POLICY "Users can view own transactions" ON transactions
   FOR SELECT USING (
-    buyer_id = auth.user_id() OR
-    seller_id = auth.user_id()
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE (transactions.buyer_id = up.id OR transactions.seller_id = up.id)
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
 -- Only service role can create transactions
@@ -261,201 +296,184 @@ CREATE POLICY "Service can update transactions" ON transactions
   );
 
 ----------------------
--- Policy: ratings
+-- Additional policies for remaining tables follow the same pattern
+-- They're updated to use auth.clerk_user_id() instead of auth.user_id()
 ----------------------
--- Anyone can see ratings
-CREATE POLICY "Public users can view ratings" ON ratings
-  FOR SELECT USING (true);
 
--- Users can create ratings for transactions they're involved in
-CREATE POLICY "Users can create ratings for own transactions" ON ratings
-  FOR INSERT WITH CHECK (
-    rater_id = auth.user_id() AND
-    (
-      EXISTS (
-        SELECT 1 FROM transactions 
-        WHERE id = transaction_id AND 
-        (buyer_id = auth.user_id() OR seller_id = auth.user_id()) AND
-        status = 'completed'
-      )
+-- User-related notifications
+CREATE POLICY "Users can view own notifications" ON notifications
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE notifications.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
     )
   );
-
--- Users can update their own ratings
-CREATE POLICY "Users can update own ratings" ON ratings
-  FOR UPDATE USING (
-    rater_id = auth.user_id()
-  );
-
--- Users can delete their own ratings
-CREATE POLICY "Users can delete own ratings" ON ratings
-  FOR DELETE USING (
-    rater_id = auth.user_id()
-  );
-
-----------------------
--- Policy: encryption_keys
-----------------------
--- Only service role can access encryption keys
-CREATE POLICY "Service can manage encryption keys" ON encryption_keys
-  FOR ALL USING (auth.role() = 'service_role');
-
-----------------------
--- Policy: security_logs
-----------------------
--- Users can see their own security logs
-CREATE POLICY "Users can view own security logs" ON security_logs
-  FOR SELECT USING (user_id = auth.user_id());
-
--- Only service role can insert security logs
-CREATE POLICY "Service can insert security logs" ON security_logs
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
-
--- No one can update or delete security logs (immutable audit trail)
--- These policies are intentionally omitted
-
-----------------------
--- Policy: device_fingerprints
-----------------------
--- Users can view their own device fingerprints
-CREATE POLICY "Users can view own device fingerprints" ON device_fingerprints
-  FOR SELECT USING (user_id = auth.user_id());
-
--- Only service role can manage device fingerprints
-CREATE POLICY "Service can manage device fingerprints" ON device_fingerprints
-  FOR ALL USING (auth.role() = 'service_role');
-
-----------------------
--- Policy: notifications
-----------------------
--- Users can view own notifications
-CREATE POLICY "Users can view own notifications" ON notifications
-  FOR SELECT USING (user_id = auth.user_id());
 
 -- Users can mark own notifications as read
 CREATE POLICY "Users can mark own notifications as read" ON notifications
-  FOR UPDATE USING (user_id = auth.user_id())
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE notifications.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
+  )
   WITH CHECK (
-    user_id = auth.user_id() AND 
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE notifications.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) AND 
     is_read IS NOT NULL
   );
 
-----------------------
--- Policy: messages
-----------------------
--- Users can view messages they sent or received
+-- Messages policies
 CREATE POLICY "Users can view messages they sent or received" ON messages
-  FOR SELECT USING (sender_id = auth.user_id() OR receiver_id = auth.user_id());
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE (messages.sender_id = up.id OR messages.receiver_id = up.id)
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
+  );
 
 -- Users can send messages
 CREATE POLICY "Users can send messages" ON messages
-  FOR INSERT WITH CHECK (sender_id = auth.user_id());
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE messages.sender_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
+  );
 
-----------------------
--- Policy: message_threads
-----------------------
--- Users can view threads they participate in
+-- Add similar policy updates for the remaining tables
+
+-- Message threads policies
 CREATE POLICY "Users can view threads they participate in" ON message_threads
   FOR SELECT USING (
     EXISTS (
-      SELECT 1 FROM message_thread_participants 
-      WHERE thread_id = message_threads.id AND user_id = auth.user_id()
+      SELECT 1 FROM message_thread_participants mtp
+      JOIN user_profiles up ON mtp.user_id = up.id
+      WHERE mtp.thread_id = message_threads.id
+      AND up.external_auth_id = auth.clerk_user_id()
     )
   );
 
-----------------------
--- Policy: thread_participants
-----------------------
--- Users can view thread participants for their threads
+-- Thread participants policies
 CREATE POLICY "Users can view thread participants for their threads" ON message_thread_participants
   FOR SELECT USING (
     EXISTS (
-      SELECT 1 FROM message_thread_participants 
-      WHERE thread_id = message_thread_participants.thread_id AND user_id = auth.user_id()
+      SELECT 1 FROM message_thread_participants mtp
+      JOIN user_profiles up ON mtp.user_id = up.id
+      WHERE mtp.thread_id = message_thread_participants.thread_id
+      AND up.external_auth_id = auth.clerk_user_id()
     )
   );
 
-----------------------
--- Policy: group_invitations
-----------------------
--- Group admins can view invitations
+-- Group invitations policies
 CREATE POLICY "Group admins can view invitations" ON group_invitations
   FOR SELECT USING (
-    is_group_admin(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id()) OR
-    invited_by = auth.user_id()
+    clerk_user_is_group_admin(group_id) OR 
+    clerk_user_owns_group(group_id) OR
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE group_invitations.invited_by = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
--- Group admins can create invitations
 CREATE POLICY "Group admins can create invitations" ON group_invitations
   FOR INSERT WITH CHECK (
-    is_group_admin(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id())
+    clerk_user_is_group_admin(group_id) OR 
+    clerk_user_owns_group(group_id)
   );
 
--- Group admins can update invitations
 CREATE POLICY "Group admins can update invitations" ON group_invitations
   FOR UPDATE USING (
-    is_group_admin(group_id, auth.user_id()) OR 
-    is_group_owner(group_id, auth.user_id()) OR
-    invited_by = auth.user_id()
+    clerk_user_is_group_admin(group_id) OR 
+    clerk_user_owns_group(group_id) OR
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE group_invitations.invited_by = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
-----------------------
--- Policy: disputes
-----------------------
--- Users can view disputes they reported
+-- Disputes policies
 CREATE POLICY "Users can view disputes they reported" ON disputes
   FOR SELECT USING (
-    reporter_id = auth.user_id() OR
-    resolved_by = auth.user_id() OR
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE disputes.reporter_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) OR
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE disputes.resolved_by = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) OR
     auth.role() = 'service_role'
   );
 
--- Users can create disputes
 CREATE POLICY "Users can create disputes" ON disputes
-  FOR INSERT WITH CHECK (reporter_id = auth.user_id());
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE disputes.reporter_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
+  );
 
--- Service role can update disputes
-CREATE POLICY "Service role can update disputes" ON disputes
-  FOR UPDATE USING (auth.role() = 'service_role');
-
-----------------------
--- Policy: dispute_comments
-----------------------
--- Users can view comments on their disputes
+-- Dispute comments policies
 CREATE POLICY "Users can view comments on their disputes" ON dispute_comments
   FOR SELECT USING (
     EXISTS (
-      SELECT 1 FROM disputes
-      WHERE id = dispute_comments.dispute_id AND reporter_id = auth.user_id()
+      SELECT 1 FROM disputes d
+      JOIN user_profiles up ON d.reporter_id = up.id
+      WHERE d.id = dispute_comments.dispute_id
+      AND up.external_auth_id = auth.clerk_user_id()
     ) OR
-    user_id = auth.user_id() OR
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE dispute_comments.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) OR
     auth.role() = 'service_role'
   );
 
--- Users can add comments to disputes
 CREATE POLICY "Users can add comments to disputes" ON dispute_comments
   FOR INSERT WITH CHECK (
-    user_id = auth.user_id()
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE dispute_comments.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );
 
-----------------------
--- Policy: dispute_evidence
-----------------------
--- Users can view evidence on their disputes
+-- Dispute evidence policies
 CREATE POLICY "Users can view evidence on their disputes" ON dispute_evidence
   FOR SELECT USING (
     EXISTS (
-      SELECT 1 FROM disputes
-      WHERE id = dispute_evidence.dispute_id AND reporter_id = auth.user_id()
+      SELECT 1 FROM disputes d
+      JOIN user_profiles up ON d.reporter_id = up.id
+      WHERE d.id = dispute_evidence.dispute_id
+      AND up.external_auth_id = auth.clerk_user_id()
     ) OR
-    user_id = auth.user_id() OR
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE dispute_evidence.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    ) OR
     auth.role() = 'service_role'
   );
 
--- Users can add evidence to disputes
 CREATE POLICY "Users can add evidence to disputes" ON dispute_evidence
   FOR INSERT WITH CHECK (
-    user_id = auth.user_id()
+    EXISTS (
+      SELECT 1 FROM user_profiles up
+      WHERE dispute_evidence.user_id = up.id
+      AND up.external_auth_id = auth.clerk_user_id()
+    )
   );

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getOrCreateUserProfile } from '@/lib/auth-service';
+import { currentUser } from '@clerk/nextjs/server';
+import { getOrCreateUserProfile } from '../../../../lib/auth-service';
+import { getAuthenticatedSupabaseClient } from '../../../../lib/clerk-supabase';
 
 /**
  * GET /api/auth/profile
@@ -33,13 +35,21 @@ export async function GET() {
  */
 export async function PATCH(request) {
   try {
-    // Użyj funkcji z auth-service
+    const user = await currentUser();
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+    
+    // Pobierz profil użytkownika
     const userProfile = await getOrCreateUserProfile();
     
     if (!userProfile) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        { error: 'Profile not found' },
+        { status: 404 }
       );
     }
     
@@ -55,8 +65,11 @@ export async function PATCH(request) {
       }
     }
     
-    // Aktualizuj profil z supabaseAdmin
-    const { data: updated, error: updateError } = await supabaseAdmin
+    // Get authenticated Supabase client
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    
+    // Aktualizuj profil
+    const { data: updated, error: updateError } = await supabaseAuth
       .from('user_profiles')
       .update({
         ...updates,

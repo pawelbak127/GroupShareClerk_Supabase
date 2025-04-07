@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import supabase from '../../../lib/supabase-client';
+import { getCurrentUserProfile } from '@/lib/auth-service';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
 
 /**
  * GET /api/groups
@@ -17,8 +18,11 @@ export async function GET(request) {
       );
     }
 
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+
     // Pobierz grupy, których użytkownik jest członkiem
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAuth
       .from('group_members')
       .select(`
         status,
@@ -32,7 +36,7 @@ export async function GET(request) {
           updated_at
         )
       `)
-      .eq('user_id', user.id)
+      .eq('user_id', profile.id)
       .eq('status', 'active');
 
     if (error) {
@@ -64,7 +68,7 @@ export async function GET(request) {
     const groups = data.map(item => ({
       ...item.groups,
       role: item.role,
-      isOwner: item.groups.owner_id === user.id
+      isOwner: item.groups.owner_id === profile.id
     }));
 
     return NextResponse.json(groups);
@@ -92,6 +96,10 @@ export async function POST(request) {
       );
     }
 
+    // Get authenticated Supabase client
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const profile = await getCurrentUserProfile();
+
     // Pobierz dane żądania
     const body = await request.json();
     const { name, description } = body;
@@ -104,12 +112,12 @@ export async function POST(request) {
     }
 
     // Utwórz nową grupę
-    const { data: group, error: groupError } = await supabase
+    const { data: group, error: groupError } = await supabaseAuth
       .from('groups')
       .insert({
         name,
         description: description || '',
-        owner_id: user.id,
+        owner_id: profile.id,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
@@ -154,14 +162,14 @@ export async function POST(request) {
     }
     
     // Dodaj właściciela jako członka grupy
-    const { error: memberError } = await supabase
+    const { error: memberError } = await supabaseAuth
       .from('group_members')
       .insert({
         group_id: group.id,
-        user_id: user.id,
+        user_id: profile.id,
         role: 'admin',
         status: 'active',
-        invited_by: user.id,
+        invited_by: profile.id,
         joined_at: new Date().toISOString()
       });
 
@@ -172,7 +180,7 @@ export async function POST(request) {
       // Jeśli wymagane jest zachowanie spójności, można rozważyć usunięcie grupy
       if (memberError.code === '23503' || memberError.code === '42501') {
         console.warn('Rolling back group creation due to member creation failure');
-        await supabase.from('groups').delete().eq('id', group.id);
+        await supabaseAuth.from('groups').delete().eq('id', group.id);
         
         return NextResponse.json(
           { error: 'Failed to complete group creation process', code: memberError.code },
