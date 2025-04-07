@@ -11,7 +11,7 @@
     "db:migrate": "npx supabase migration up"
   },
   "dependencies": {
-    "@clerk/nextjs": "^6.12.12",
+    "@clerk/nextjs": "^6.13.0",
     "@heroicons/react": "^2.0.18",
     "@supabase/supabase-js": "^2.49.4",
     "crypto-js": "^4.2.0",

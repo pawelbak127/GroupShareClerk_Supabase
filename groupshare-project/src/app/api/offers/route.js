@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import { getCurrentUserProfile } from '@/lib/auth-service';
-import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
-import { getSubscriptionOffers } from '@/lib/supabase-client';
+import { getCurrentUserProfile } from '../../../lib/auth-service';
+import { getAuthenticatedSupabaseClient } from '../../../lib/clerk-supabase';
+import { getSubscriptionOffers } from '../../../lib/supabase-client';
 
 /**
  * GET /api/offers

@@ -31,7 +31,37 @@ export function createSupabaseClientWithAuth(clerkToken) {
 export async function getAuthenticatedSupabaseClient(user) {
   if (!user) return createClient(supabaseUrl, supabaseAnonKey);
   
-  const token = await user.getToken({ template: "supabase" });
-  
-  return createSupabaseClientWithAuth(token);
+  try {
+    // First try to get the token with the template parameter (preferred method)
+    if (typeof user.getToken === 'function') {
+      try {
+        const token = await user.getToken({ template: "supabase" });
+        return createSupabaseClientWithAuth(token);
+      } catch (err) {
+        console.warn('Could not get token with template parameter:', err);
+      }
+    }
+    
+    // Fallback: try to get the token without any parameters
+    if (typeof user.getToken === 'function') {
+      try {
+        const token = await user.getToken();
+        return createSupabaseClientWithAuth(token);
+      } catch (err) {
+        console.warn('Could not get token without parameters:', err);
+      }
+    }
+    
+    // Fallback: try to access JWT directly (if available on user object)
+    if (user.jwt) {
+      return createSupabaseClientWithAuth(user.jwt);
+    }
+    
+    // If all else fails, log a warning and return unauthenticated client
+    console.warn('Could not get authentication token from user object, returning unauthenticated client');
+    return createClient(supabaseUrl, supabaseAnonKey);
+  } catch (error) {
+    console.error('Error in getAuthenticatedSupabaseClient:', error);
+    return createClient(supabaseUrl, supabaseAnonKey);
+  }
 }
