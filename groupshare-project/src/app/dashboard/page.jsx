@@ -3,36 +3,15 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../../hooks/useAuth';
-import { useSession } from '@clerk/nextjs';
-import { createClient } from '@supabase/supabase-js';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 
 export default function Dashboard() {
-  const { profile, isLoading } = useAuth();
-  const { session } = useSession();
+  const { profile, isLoading, supabase, clerkUser } = useAuth();
   const [applications, setApplications] = useState([]);
   const [pendingApplications, setPendingApplications] = useState([]);
   const [groups, setGroups] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [error, setError] = useState(null);
-  const [supabase, setSupabase] = useState(null);
-
-  // Inicjalizacja klienta Supabase z nową metodą
-  useEffect(() => {
-    if (!session) return;
-    
-    const client = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        async accessToken() {
-          return session?.getToken() ?? null;
-        },
-      }
-    );
-    
-    setSupabase(client);
-  }, [session]);
 
   // Pobierz dane po załadowaniu profilu i klienta Supabase
   useEffect(() => {
@@ -98,7 +77,7 @@ export default function Dashboard() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
         <p className="text-gray-600 mt-1">
-          Witaj, {user?.fullName || user?.username || 'użytkowniku'}! Oto aktualne informacje o Twoich subskrypcjach.
+          Witaj, {clerkUser?.fullName || profile?.display_name || 'użytkowniku'}! Oto aktualne informacje o Twoich subskrypcjach.
         </p>
       </div>
 
@@ -240,7 +219,7 @@ export default function Dashboard() {
                       <p className="font-medium text-gray-900">{group.name}</p>
                       <p className="text-sm text-gray-500 mt-1">
                         Rola: <span className="font-medium">
-                          {group.isOwner ? 'Właściciel' : group.role === 'admin' ? 'Administrator' : 'Członek'}
+                          {group.owner_id === profile.id ? 'Właściciel' : group.role === 'admin' ? 'Administrator' : 'Członek'}
                         </span>
                       </p>
                     </div>

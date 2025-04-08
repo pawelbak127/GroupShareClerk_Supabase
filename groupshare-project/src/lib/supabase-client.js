@@ -16,31 +16,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Tworzy klienta Supabase za pomocą tokenu Clerk
- * @param {string} clerkToken - Token Clerk
- * @returns {Object} Supabase client
- */
-export const createSupabaseClient = (clerkToken = null) => {
-  if (clerkToken) {
-    // Metoda z bezpośrednim tokenem
-    return createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${clerkToken}`
-        }
-      }
-    });
-  }
-  
-  return createClient(supabaseUrl, supabaseAnonKey);
-};
-
-/**
- * Tworzy klienta Supabase z nową metodą integracji bazującą na sesji Clerk
+ * Tworzy klienta Supabase z sesją Clerk (nowa integracja)
  * @param {Object} session - Sesja Clerk
- * @returns {Object} Supabase client
+ * @returns {Object} Klient Supabase z uwierzytelnianiem
  */
-export const createModernSupabaseClient = (session) => {
+export const createSupabaseClient = (session) => {
   if (!session) {
     return createClient(supabaseUrl, supabaseAnonKey);
   }
@@ -50,12 +30,11 @@ export const createModernSupabaseClient = (session) => {
     supabaseAnonKey,
     {
       async accessToken() {
-        return await session.getToken();
-      },
+        return session?.getToken() ?? null;
+      }
     }
   );
 };
-
 
 /**
  * Pobiera oferty subskrypcji z możliwością filtrowania

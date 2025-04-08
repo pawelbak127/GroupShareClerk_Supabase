@@ -2,45 +2,37 @@
   "node": {
     "a7405dc996cfb77bb8f0faf2b357ae7c778d2220": {
       "workers": {
-        "app/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!",
-        "app/offers/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!"
+        "app/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!"
       },
       "layer": {
-        "app/page": "rsc",
-        "app/offers/page": "rsc"
+        "app/page": "rsc"
       }
     },
     "bff0a968cd3f4b2de2db73a9d62666ed79d1b2fd": {
       "workers": {
-        "app/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!",
-        "app/offers/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!"
+        "app/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!"
       },
       "layer": {
-        "app/page": "rsc",
-        "app/offers/page": "rsc"
+        "app/page": "rsc"
       }
     },
     "f2e81bc424768a60bfa24ca1f0f2ad8f2491d34d": {
       "workers": {
-        "app/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!",
-        "app/offers/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!"
+        "app/page": "(rsc)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Ckeyless-actions.js%22%2C%5B%22syncKeylessConfigAction%22%2C%22createOrReadKeylessAction%22%2C%22deleteKeylessAction%22%5D%5D%5D&__client_imported__=!"
       },
       "layer": {
-        "app/page": "rsc",
-        "app/offers/page": "rsc"
+        "app/page": "rsc"
       }
     },
     "1fd360dcbe7c9926f4623c13e0c2a76ec7fdf574": {
       "workers": {
-        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Cserver-actions.js%22%2C%5B%22invalidateCacheAction%22%5D%5D%5D&__client_imported__=true!",
-        "app/offers/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Cserver-actions.js%22%2C%5B%22invalidateCacheAction%22%5D%5D%5D&__client_imported__=true!"
+        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22C%3A%5C%5CUsers%5C%5Cbacze%5C%5CProject%5C%5CGroupShareClerk_Supabase%5C%5Cgroupshare-project%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Cserver-actions.js%22%2C%5B%22invalidateCacheAction%22%5D%5D%5D&__client_imported__=true!"
       },
       "layer": {
-        "app/page": "action-browser",
-        "app/offers/page": "action-browser"
+        "app/page": "action-browser"
       }
     }
   },
   "edge": {},
-  "encryptionKey": "Q3Nu/Ye5E29Pz1tAY1xKt4ZvYRMQ0DaNGAKycarBS44="
+  "encryptionKey": "E34+nr6PgPsWIQEq/+jEdaumcI2iCR8AZpVAr5mtq3Y="
 }

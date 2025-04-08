@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { getOrCreateUserProfile } from '../../../../lib/auth-service';
+import { getOrCreateUserProfile } from '@/lib/auth-service';
 
 /**
  * GET /api/auth/profile
