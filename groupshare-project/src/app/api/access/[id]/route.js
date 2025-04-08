@@ -9,7 +9,7 @@ import {
   DeviceFingerprinter,
   AnomalyDetector
 } from '@/lib/security';
-import supabase from '@/lib/supabase-client';
+import { createServerSupabaseClient } from '@/lib/supabase-server';
 
 /**
  * GET /api/access/[id]
@@ -38,6 +38,9 @@ export async function GET(request, { params }) {
         { status: 401 }
       );
     }
+
+    // Utwórz klienta Supabase z SSR
+    const supabase = createServerSupabaseClient();
 
     // Inicjalizuj serwisy
     const tokenService = new TokenService();

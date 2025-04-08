@@ -1,43 +1,59 @@
 'use client'
 
 import { useState, useEffect, createContext, useContext } from 'react';
-import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
-import { createSupabaseClient } from '../lib/supabase-client';
+import { useUser, useAuth as useClerkAuth, useSession } from '@clerk/nextjs';
+import { createClient } from '@supabase/supabase-js';
 
 const AuthContext = createContext(null);
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 export function AuthProvider({ children }) {
   const { isSignedIn, isLoaded } = useClerkAuth();
   const { user } = useUser();
+  const { session } = useSession();
   const [profile, setProfile] = useState(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [supabase, setSupabase] = useState(null);
   const [clerkToken, setClerkToken] = useState(null);
 
-  // Get Clerk token when user is signed in
+  // Tworzy klienta Supabase z wykorzystaniem nowej integracji Clerk
   useEffect(() => {
+    if (!session) {
+      setSupabase(createClient(supabaseUrl, supabaseAnonKey));
+      setClerkToken(null);
+      return;
+    }
+    
+    // Tworzenie klienta z nową metodą integracji
+    const client = createClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        async accessToken() {
+          return session?.getToken() ?? null;
+        },
+      }
+    );
+    
+    setSupabase(client);
+    
+    // Nadal pobiera token dla kompatybilności z innymi komponentami
     async function getToken() {
-      if (isSignedIn && user) {
-        try {
-          const token = await user.getToken({ template: "supabase" });
-          setClerkToken(token);
-        } catch (error) {
-          console.error('Error getting Clerk token:', error);
-        }
-      } else {
+      try {
+        const token = await session?.getToken();
+        setClerkToken(token);
+      } catch (error) {
+        console.error('Error getting Clerk token:', error);
         setClerkToken(null);
       }
     }
     
     getToken();
-  }, [isSignedIn, user]);
+  }, [session]);
 
-  // Create Supabase client with Clerk token
-  useEffect(() => {
-    setSupabase(createSupabaseClient(clerkToken));
-  }, [clerkToken]);
-
-  // Fetch user profile
+  // Pobiera profil użytkownika
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !supabase) {
       setProfile(null);
@@ -76,7 +92,8 @@ export function AuthProvider({ children }) {
         clerkToken,
         isLoadingProfile,
         isLoading: isLoadingProfile || !isLoaded,
-        supabase
+        supabase,
+        session
       }}
     >
       {children}

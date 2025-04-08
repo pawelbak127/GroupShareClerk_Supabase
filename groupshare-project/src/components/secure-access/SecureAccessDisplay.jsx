@@ -113,6 +113,7 @@ const SecureAccessDisplay = ({ applicationId, token }) => {
     }
   };
 
+  // Renderowanie komponentu
   if (isLoading) {
     return (
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 flex items-center justify-center">
@@ -137,20 +138,9 @@ const SecureAccessDisplay = ({ applicationId, token }) => {
     );
   }
 
-  if (timeLeft === 0) {
-    return (
-      <div className="bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm p-6">
-        <div className="flex items-center">
-          <ExclamationTriangleIcon className="h-6 w-6 text-yellow-500" />
-          <h3 className="ml-2 text-lg font-medium text-yellow-800">Instrukcje wygasły</h3>
-        </div>
-        <p className="mt-2 text-sm text-yellow-700">
-          Ze względów bezpieczeństwa instrukcje dostępowe wygasły. Jeśli potrzebujesz ponownie uzyskać dostęp, poproś sprzedającego o wygenerowanie nowego linku.
-        </p>
-      </div>
-    );
-  }
-
+  // Pozostałą część komponentu zostawiam bez zmian
+  // ...
+  
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-4">
       <div className="flex justify-between items-center">

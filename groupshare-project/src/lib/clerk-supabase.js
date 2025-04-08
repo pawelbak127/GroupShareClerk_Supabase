@@ -12,8 +12,8 @@ export async function getAuthenticatedSupabaseClient(user) {
   if (!user) return createClient(supabaseUrl, supabaseAnonKey);
   
   try {
-    // Pobierz token z template "supabase" dla poprawnej integracji
-    const token = await user.getToken({ template: "supabase" });
+    // Nowa metoda integracji - pobierz standardowy token bez parametru template
+    const token = await user.getToken();
     
     // Utwórz klienta z tokenem Clerk
     return createClient(supabaseUrl, supabaseAnonKey, {
@@ -28,4 +28,21 @@ export async function getAuthenticatedSupabaseClient(user) {
     // W przypadku błędu zwróć klienta anonimowego
     return createClient(supabaseUrl, supabaseAnonKey);
   }
+}
+
+/**
+ * Nowoczesny sposób tworzenia klienta Supabase z sesją Clerk
+ * @param {Object} session - Clerk session
+ * @returns {Object} Supabase client
+ */
+export function createClerkSupabaseClient(session) {
+  return createClient(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      async accessToken() {
+        return session?.getToken() ?? null;
+      },
+    }
+  );
 }

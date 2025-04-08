@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
-import { createClient } from '@supabase/supabase-js';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
 
 /**
  * POST /api/purchases/[id]/confirm-access
@@ -29,21 +29,8 @@ export async function POST(request, { params }) {
       );
     }
     
-    // Pobierz token z Clerk
-    const clerkToken = await user.getToken();
-    
-    // Stwórz autoryzowany klient Supabase używając tokenu Clerk
-    const supabaseWithAuth = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${clerkToken}`
-          }
-        }
-      }
-    );
+    // Użyj nowej metody uwierzytelniania
+    const supabaseWithAuth = await getAuthenticatedSupabaseClient(user);
     
     // Pobierz informacje o zakupie - RLS w Supabase automatycznie sprawdzi dostęp użytkownika
     const { data: purchase, error: purchaseError } = await supabaseWithAuth

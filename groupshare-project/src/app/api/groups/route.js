@@ -19,6 +19,7 @@ export async function GET(request) {
       );
     }
 
+    // Użyj nowej metody uwierzytelniania Supabase
     const supabaseAuth = await getAuthenticatedSupabaseClient(user);
     const profile = await getCurrentUserProfile();
 

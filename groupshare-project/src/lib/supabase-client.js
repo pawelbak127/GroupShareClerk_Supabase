@@ -15,9 +15,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // This client is for unauthenticated operations only
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Helper function to create a authenticated client with a Clerk token
-export const createSupabaseClient = (clerkToken) => {
+/**
+ * Tworzy klienta Supabase za pomocą tokenu Clerk
+ * @param {string} clerkToken - Token Clerk
+ * @returns {Object} Supabase client
+ */
+export const createSupabaseClient = (clerkToken = null) => {
   if (clerkToken) {
+    // Metoda z bezpośrednim tokenem
     return createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -31,16 +36,30 @@ export const createSupabaseClient = (clerkToken) => {
 };
 
 /**
+ * Tworzy klienta Supabase z nową metodą integracji bazującą na sesji Clerk
+ * @param {Object} session - Sesja Clerk
+ * @returns {Object} Supabase client
+ */
+export const createModernSupabaseClient = (session) => {
+  if (!session) {
+    return createClient(supabaseUrl, supabaseAnonKey);
+  }
+  
+  return createClient(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      async accessToken() {
+        return await session.getToken();
+      },
+    }
+  );
+};
+
+
+/**
  * Pobiera oferty subskrypcji z możliwością filtrowania
  * @param {Object} filters - Filtry do zapytania
- * @param {string} filters.platformId - ID platformy do filtrowania
- * @param {number} filters.minPrice - Minimalna cena
- * @param {number} filters.maxPrice - Maksymalna cena
- * @param {boolean} filters.availableSlots - Czy pokazywać tylko oferty z dostępnymi miejscami
- * @param {string} filters.orderBy - Pole do sortowania
- * @param {boolean} filters.ascending - Kierunek sortowania (rosnąco/malejąco)
- * @param {number} filters.limit - Limit wyników
- * @param {number} filters.offset - Przesunięcie wyników (paginacja)
  * @returns {Promise<Array>} - Lista ofert subskrypcji
  */
 export async function getSubscriptionOffers(filters = {}) {

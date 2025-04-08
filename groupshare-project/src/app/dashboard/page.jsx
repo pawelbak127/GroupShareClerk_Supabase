@@ -2,20 +2,41 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useAuth } from '../../hooks/useAuth'; // Zmiana importu
+import { useAuth } from '../../hooks/useAuth';
+import { useSession } from '@clerk/nextjs';
+import { createClient } from '@supabase/supabase-js';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 
 export default function Dashboard() {
-  const { profile, isLoading, supabase } = useAuth(); // Użyj nowego hooka
+  const { profile, isLoading } = useAuth();
+  const { session } = useSession();
   const [applications, setApplications] = useState([]);
   const [pendingApplications, setPendingApplications] = useState([]);
   const [groups, setGroups] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [error, setError] = useState(null);
+  const [supabase, setSupabase] = useState(null);
 
-  // Pobierz dane po załadowaniu profilu
+  // Inicjalizacja klienta Supabase z nową metodą
   useEffect(() => {
-    if (isLoading || !profile) return;
+    if (!session) return;
+    
+    const client = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        async accessToken() {
+          return session?.getToken() ?? null;
+        },
+      }
+    );
+    
+    setSupabase(client);
+  }, [session]);
+
+  // Pobierz dane po załadowaniu profilu i klienta Supabase
+  useEffect(() => {
+    if (isLoading || !profile || !supabase) return;
 
     const fetchDashboardData = async () => {
       setIsLoadingData(true);

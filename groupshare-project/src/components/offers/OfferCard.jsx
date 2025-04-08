@@ -1,15 +1,31 @@
-// src/components/offers/OfferCard.jsx
 'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth, useSession } from '@clerk/nextjs';
 import { toast } from 'react-hot-toast';
+import { createClient } from '@supabase/supabase-js';
 
 const OfferCard = ({ offer }) => {
   const router = useRouter();
   const { isSignedIn } = useAuth();
+  const { session } = useSession();
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Utworzenie klienta Supabase z sesją Clerk
+  const getSupabaseClient = () => {
+    if (!session) return null;
+    
+    return createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        async accessToken() {
+          return session?.getToken() ?? null;
+        },
+      }
+    );
+  };
   
   const handlePurchase = async () => {
     if (!isSignedIn) {
