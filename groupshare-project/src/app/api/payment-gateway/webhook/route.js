@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 // src/app/api/payment-gateway/webhook/route.js
 export async function POST(request) {
     try {

@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import { Webhook } from "@clerk/clerk-sdk-node";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
