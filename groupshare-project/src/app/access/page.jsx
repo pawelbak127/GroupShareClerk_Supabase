@@ -1,15 +1,31 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useAuth } from '@clerk/nextjs';
+import { ErrorBoundary } from 'react-error-boundary';
 import SecureAccessDisplay from '@/components/secure-access/SecureAccessDisplay';
 import LoginRedirect from '@/components/auth/LoginRedirect';
 
-/**
- * Strona do bezpiecznego wyświetlania instrukcji dostępowych po użyciu jednorazowego tokenu
- */
-export default function AccessPage() {
+// Komponent wyświetlający informację o błędzie
+function ErrorFallback({ error }) {
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="bg-red-50 rounded-lg border border-red-200 shadow-sm p-6">
+        <h2 className="text-lg font-medium text-red-800">Wystąpił błąd</h2>
+        <p className="mt-2 text-sm text-red-700">
+          Nie udało się załadować strony. Spróbuj odświeżyć przeglądarkę lub skontaktuj się z obsługą.
+        </p>
+        <p className="mt-2 text-xs text-red-600">
+          {error.message}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Komponent z główną zawartością strony, który używa useSearchParams
+function AccessPageContent() {
   const searchParams = useSearchParams();
   const { isSignedIn, isLoaded } = useAuth();
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
@@ -71,5 +87,21 @@ export default function AccessPage() {
         token={token} 
       />
     </div>
+  );
+}
+
+// Główny komponent strony, który używa Suspense i ErrorBoundary
+export default function AccessPage() {
+  return (
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-indigo-500"></div>
+          <span className="ml-3 text-gray-600">Ładowanie...</span>
+        </div>
+      }>
+        <AccessPageContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }
