@@ -3,8 +3,14 @@
 
 -- Create a function to get the current authenticated user ID
 CREATE OR REPLACE FUNCTION auth.user_id() RETURNS UUID AS $$
+DECLARE
+  profile_id UUID;
 BEGIN
-  RETURN (SELECT id FROM user_profiles WHERE external_auth_id = auth.uid()::text);
+  SELECT id INTO profile_id 
+  FROM user_profiles 
+  WHERE external_auth_id = auth.clerk_user_id();
+  
+  RETURN profile_id;
 EXCEPTION
   WHEN NO_DATA_FOUND THEN
     RETURN NULL;
@@ -74,7 +80,7 @@ BEGIN
   END IF;
 
   SELECT 
-    AVG((access_quality + communication + reliability) / 3.0),
+    COALESCE(AVG((access_quality + communication + reliability) / 3.0), 0),
     COUNT(*)
   INTO
     avg_rating,
@@ -84,8 +90,8 @@ BEGIN
   
   UPDATE user_profiles
   SET 
-    rating_avg = COALESCE(avg_rating, 0),
-    rating_count = COALESCE(rating_count, 0)
+    rating_avg = avg_rating,
+    rating_count = rating_count
   WHERE id = user_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -194,7 +200,6 @@ BEGIN
                 NULL,
                 jsonb_build_object('error', SQLERRM)
             );
-            ROLLBACK;
             RAISE;
     END;
 END;
@@ -250,6 +255,7 @@ BEGIN
             amount,
             platform_fee,
             seller_amount,
+            currency,
             payment_method,
             payment_provider,
             payment_id,
@@ -262,6 +268,7 @@ BEGIN
             p_amount,
             platform_fee,
             seller_amount,
+            (SELECT currency FROM group_subs WHERE id = p_group_sub_id),
             p_payment_method,
             p_payment_provider,
             p_payment_id,
@@ -282,7 +289,6 @@ BEGIN
                 NULL,
                 jsonb_build_object('error', SQLERRM)
             );
-            ROLLBACK;
             RAISE;
     END;
 END;
@@ -364,7 +370,6 @@ BEGIN
                 NULL,
                 jsonb_build_object('error', SQLERRM)
             );
-            ROLLBACK;
             RAISE;
     END;
 END;
@@ -459,6 +464,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger to update available slots
+DROP TRIGGER IF EXISTS update_slots_on_purchase_status_change ON purchase_records;
 CREATE TRIGGER update_slots_on_purchase_status_change
 AFTER UPDATE OF status ON purchase_records
 FOR EACH ROW
@@ -486,7 +492,7 @@ BEGIN
         WHERE user_id = p_user_id 
         AND group_sub_id = p_group_sub_id 
         AND status = 'completed'
-    );
+    ) OR is_development_mode(); -- Allow access in development mode
 EXCEPTION
     WHEN OTHERS THEN
         -- Logowanie błędu
@@ -528,6 +534,11 @@ BEGIN
         
         IF slots_available IS NULL THEN
             RAISE EXCEPTION 'Group subscription not found';
+        END IF;
+        
+        -- In development mode, always allow slots
+        IF is_development_mode() THEN
+            slots_available := GREATEST(slots_available, 1);
         END IF;
         
         IF slots_available <= 0 THEN
@@ -594,7 +605,6 @@ BEGIN
                 NULL,
                 jsonb_build_object('error', SQLERRM)
             );
-            ROLLBACK;
             RAISE;
     END;
 END;
@@ -656,6 +666,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger for access provision
+DROP TRIGGER IF EXISTS handle_access_provision_on_purchase_completion ON purchase_records;
 CREATE TRIGGER handle_access_provision_on_purchase_completion
 AFTER UPDATE OF status ON purchase_records
 FOR EACH ROW
@@ -692,7 +703,7 @@ BEGIN
         pr.id = p_purchase_record_id;
     
     -- Verify access is allowed
-    IF v_status <> 'completed' OR NOT v_access_provided THEN
+    IF (v_status <> 'completed' OR NOT v_access_provided) AND NOT is_development_mode() THEN
         RETURN 'Access not available. Status: ' || v_status || ', Access provided: ' || v_access_provided;
     END IF;
     
@@ -787,10 +798,23 @@ BEGIN
         v_purchase_record_id := reserve_subscription_slot(p_group_sub_id, p_user_id);
         
         IF v_purchase_record_id IS NULL THEN
-            RETURN jsonb_build_object(
-                'success', FALSE,
-                'message', 'Failed to reserve subscription slot. No slots available or other error.'
-            );
+            -- In development mode, create a purchase record directly
+            IF is_development_mode() THEN
+                INSERT INTO purchase_records (
+                    user_id,
+                    group_sub_id,
+                    status
+                ) VALUES (
+                    p_user_id,
+                    p_group_sub_id,
+                    'pending_payment'
+                ) RETURNING id INTO v_purchase_record_id;
+            ELSE
+                RETURN jsonb_build_object(
+                    'success', FALSE,
+                    'message', 'Failed to reserve subscription slot. No slots available or other error.'
+                );
+            END IF;
         END IF;
         
         -- Update purchase record to payment_processing
@@ -836,7 +860,6 @@ BEGIN
                 NULL,
                 jsonb_build_object('error', SQLERRM)
             );
-            ROLLBACK;
             RAISE;
     END;
 END;
@@ -935,6 +958,7 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS notify_on_payment_status_change ON transactions;
 CREATE TRIGGER notify_on_payment_status_change
 AFTER UPDATE OF status ON transactions
 FOR EACH ROW
