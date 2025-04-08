@@ -1,4 +1,4 @@
-import { WebhookEvent } from "@clerk/nextjs/server";
+import { Webhook } from "@clerk/clerk-sdk-node";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
@@ -25,14 +25,14 @@ export async function POST(req) {
   // Weryfikuj podpis
   let event;
   try {
-    event = WebhookEvent.verify(
+    const webhook = new Webhook(WEBHOOK_SECRET);
+    event = webhook.verify(
       body,
       {
         "svix-id": svix_id,
         "svix-timestamp": svix_timestamp,
         "svix-signature": svix_signature,
-      },
-      WEBHOOK_SECRET
+      }
     );
   } catch (err) {
     console.error("Błąd weryfikacji webhook:", err);
