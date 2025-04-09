@@ -21,14 +21,15 @@ export function AuthProvider({ children }) {
   // Tworzy klienta Supabase z wykorzystaniem nowej integracji Clerk
   useEffect(() => {
     if (session) {
-      // Używając nowej integracji z accessToken
+      // Używamy nowej integracji z funkcją accessToken
       const client = createClient(
         supabaseUrl,
         supabaseAnonKey,
         {
           async accessToken() {
             try {
-              return session.getToken();
+              // Zgodnie z nową integracją, nie używamy parametru template
+              return await session.getToken();
             } catch (error) {
               console.warn('Failed to get token from session:', error);
               return null;

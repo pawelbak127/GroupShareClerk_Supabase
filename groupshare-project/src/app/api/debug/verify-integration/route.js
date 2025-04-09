@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
+import { currentUser, auth } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
 import { createServerSupabaseClient } from '@/lib/supabase-server';
 import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
@@ -32,9 +32,9 @@ export async function GET(request) {
     // Pobierz token z Clerk - zgodnie z nową integracją
     let token, tokenError;
     try {
-      // Użyj sesji zamiast bezpośrednio user.getToken()
-      const userSession = await user.getSession();
-      token = userSession ? await userSession.getToken() : null;
+      // Użyj bezpośrednio auth().getToken()
+      const authInstance = auth();
+      token = await authInstance.getToken();
     } catch (error) {
       tokenError = error.message;
     }
@@ -43,7 +43,7 @@ export async function GET(request) {
     const supabaseServer = createServerSupabaseClient();
     
     // Utwórz uwierzytelnionego klienta Supabase
-    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    const supabaseAuth = await getAuthenticatedSupabaseClient();
     
     // Sprawdź, czy funkcja auth.clerk_user_id() działa
     let clerkUserId, clerkUserIdError;
@@ -140,6 +140,26 @@ export async function GET(request) {
       devModeStatus = `exception: ${error.message}`;
     }
     
+    // Sprawdź zawartość tokenu
+    let tokenDetails = null;
+    if (token) {
+      try {
+        // Dekoduj JWT (tylko do celów diagnostycznych)
+        const [header, payload, signature] = token.split('.');
+        const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString());
+        tokenDetails = {
+          header: JSON.parse(Buffer.from(header, 'base64').toString()),
+          payload: {
+            ...decodedPayload,
+            // Nie pokazuj pełnej zawartości tokenu ze względów bezpieczeństwa
+            sub: decodedPayload.sub ? `${decodedPayload.sub.substring(0, 8)}...` : null
+          }
+        };
+      } catch (error) {
+        console.error('Error decoding token:', error);
+      }
+    }
+    
     return NextResponse.json({
       integration_status: {
         clerk_user: user ? 'ok' : 'error',
@@ -159,7 +179,8 @@ export async function GET(request) {
       },
       jwt: {
         token: token ? `${token.substring(0, 10)}...` : null, // Tylko początek tokenu
-        error: tokenError || null
+        error: tokenError || null,
+        details: tokenDetails
       },
       supabase: {
         user_profile: {

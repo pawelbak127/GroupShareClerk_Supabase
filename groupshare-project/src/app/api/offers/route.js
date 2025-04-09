@@ -1,9 +1,10 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
+import { currentUser, auth } from '@clerk/nextjs/server';
 import { getCurrentUserProfile } from '../../../lib/auth-service';
+import { createServerSupabaseClient } from '../../../lib/supabase-server';
 import { getAuthenticatedSupabaseClient } from '../../../lib/clerk-supabase';
-import { getSubscriptionOffers } from '../../../lib/supabase-client';
+import supabase from '../../../lib/supabase-client';
 
 /**
  * GET /api/offers
@@ -14,8 +15,8 @@ export async function GET(request) {
     // Parse query parameters
     const { searchParams } = new URL(request.url);
     
-    // Pobierz uwierzytelnionego użytkownika, jeśli dostępny
-    const user = await currentUser();
+    // Pobierz klienta Supabase z serwerową autentykacją
+    const supabaseClient = createServerSupabaseClient();
     
     // Parse filters from query parameters
     const filters = {
@@ -29,11 +30,63 @@ export async function GET(request) {
       offset: searchParams.get('offset') ? parseInt(searchParams.get('offset')) : 0
     };
     
-    // Get subscription offers with filters, przekaż uwierzytelnionego użytkownika
-    const offers = await getSubscriptionOffers(filters, user);
+    // Przygotowanie zapytania
+    let query = supabaseClient
+      .from('group_subs')
+      .select(`
+        *,
+        subscription_platforms(*),
+        groups(id, name, description),
+        owner:groups!inner(owner_id, user_profiles!inner(id, display_name, avatar_url, rating_avg, rating_count, verification_level))
+      `)
+      .eq('status', 'active');
     
-    // Return the offers
-    return NextResponse.json(offers);
+    // Dodaj filtr na platformę
+    if (filters.platformId) {
+      query = query.eq('platform_id', filters.platformId);
+    }
+    
+    // Dodaj filtr na cenę minimalną
+    if (filters.minPrice !== undefined && !isNaN(filters.minPrice)) {
+      query = query.gte('price_per_slot', filters.minPrice);
+    }
+    
+    // Dodaj filtr na cenę maksymalną
+    if (filters.maxPrice !== undefined && !isNaN(filters.maxPrice)) {
+      query = query.lte('price_per_slot', filters.maxPrice);
+    }
+    
+    // Filtruj oferty tylko z dostępnymi miejscami
+    if (filters.availableSlots !== false) {
+      query = query.gt('slots_available', 0);
+    }
+    
+    // Sortowanie
+    const orderBy = filters.orderBy || 'created_at';
+    const ascending = filters.ascending || false;
+    query = query.order(orderBy, { ascending });
+    
+    // Limit i paginacja
+    if (filters.limit) {
+      query = query.limit(filters.limit);
+    }
+    
+    if (filters.offset) {
+      query = query.offset(filters.offset);
+    }
+    
+    // Wykonaj zapytanie
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('Error fetching subscription offers:', error);
+      return NextResponse.json(
+        { error: error.message || 'Failed to fetch subscription offers', code: error.code || 'unknown' }, 
+        { status: 500 }
+      );
+    }
+    
+    return NextResponse.json(data || []);
   } catch (error) {
     console.error('Error fetching offers:', error);
     return NextResponse.json(
@@ -58,7 +111,8 @@ export async function POST(request) {
       );
     }
     
-    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    // Użyj serwerowego klienta Supabase z autentykacją
+    const supabaseAuth = createServerSupabaseClient();
     const profile = await getCurrentUserProfile();
     
     // Parse request body

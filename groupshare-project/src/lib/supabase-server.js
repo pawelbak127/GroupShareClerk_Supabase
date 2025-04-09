@@ -17,15 +17,23 @@ export function createServerSupabaseClient() {
     supabaseUrl,
     supabaseAnonKey,
     {
+      global: {
+        headers: {
+          'x-clerk-auth-reason': 'server-component'
+        }
+      },
       async accessToken() {
         try {
+          // Pobierz instancję auth z Clerk
           const authInstance = auth();
           if (!authInstance) {
             console.log('No auth instance available in server context');
             return null;
           }
           
-          return authInstance.getToken();
+          // Pobierz token bezpośrednio z instancji auth()
+          const token = await authInstance.getToken();
+          return token;
         } catch (error) {
           console.error('Error getting token in server context:', error);
           return null;

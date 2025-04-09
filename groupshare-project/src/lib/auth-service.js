@@ -1,4 +1,4 @@
-import { currentUser } from '@clerk/nextjs/server';
+import { currentUser, auth } from '@clerk/nextjs/server';
 import supabaseAdmin from './supabase-admin-client';
 import { createServerSupabaseClient } from './supabase-server';
 
@@ -7,6 +7,7 @@ import { createServerSupabaseClient } from './supabase-server';
  */
 export async function getCurrentUserProfile() {
   try {
+    // Pobierz użytkownika z Clerk
     const user = await currentUser();
     
     if (!user) {
@@ -16,7 +17,22 @@ export async function getCurrentUserProfile() {
     
     console.log('Getting profile for user:', user.id);
     
-    // Używamy supabaseAdmin, które ma pełne uprawnienia (pomija RLS)
+    // Tworzymy uwierzytelnionego klienta Supabase
+    const supabaseClient = createServerSupabaseClient();
+    
+    // Próbujemy najpierw pobrać profil używając uwierzytelnionego klienta
+    const { data: authData, error: authError } = await supabaseClient
+      .from('user_profiles')
+      .select('*')
+      .eq('external_auth_id', user.id)
+      .single();
+      
+    if (!authError && authData) {
+      console.log('Found profile using authenticated client');
+      return authData;
+    }
+    
+    // Jeśli nie udało się pobrać z uwierzytelnionym klientem, używamy supabaseAdmin
     const { data, error } = await supabaseAdmin
       .from('user_profiles')
       .select('*')
@@ -66,18 +82,32 @@ export async function getOrCreateUserProfile() {
     
     console.log('Creating new profile for user:', user.id);
     
+    // Próbujemy pobrać e-mail i dane
+    let email = '';
+    let firstName = '';
+    let lastName = '';
+    let imageUrl = null;
+    
+    if (user.emailAddresses && user.emailAddresses.length > 0) {
+      email = user.emailAddresses[0].emailAddress;
+    }
+    
+    firstName = user.firstName || '';
+    lastName = user.lastName || '';
+    imageUrl = user.imageUrl || null;
+    
     // W przeciwnym razie utwórz nowy profil
     const newProfile = {
       external_auth_id: user.id,
-      display_name: user.firstName 
-        ? `${user.firstName} ${user.lastName || ''}`.trim() 
-        : (user.username || user.emailAddresses?.[0]?.emailAddress.split('@')[0] || 'Nowy użytkownik'),
-      email: user.emailAddresses?.[0]?.emailAddress || '',
-      phone_number: user.phoneNumbers?.[0]?.phoneNumber || null,
+      display_name: firstName 
+        ? `${firstName} ${lastName || ''}`.trim() 
+        : (user.username || 'Nowy użytkownik'),
+      email: email,
+      phone_number: user.phoneNumbers && user.phoneNumbers[0]?.phoneNumber || null,
       profile_type: 'both',
       verification_level: 'basic',
       bio: '',
-      avatar_url: user.imageUrl || null,
+      avatar_url: imageUrl,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -174,14 +204,14 @@ export async function verifyUserSession() {
       return false;
     }
     
-    // Sprawdź, czy możemy pobrać sesję i token
+    // Sprawdź, czy możemy pobrać token
     try {
-      const userSession = await user.getSession();
-      if (!userSession) {
+      const authInstance = auth();
+      if (!authInstance) {
         return false;
       }
       
-      const token = await userSession.getToken();
+      const token = await authInstance.getToken();
       return !!token;
     } catch (error) {
       console.error('Error verifying user session:', error);

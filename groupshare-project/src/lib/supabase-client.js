@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getAuthenticatedSupabaseClient } from './clerk-supabase';
 
 // Initialize the Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -30,6 +31,7 @@ export const createSupabaseClient = (session) => {
     supabaseAnonKey,
     {
       async accessToken() {
+        // Zgodnie z nową integracją, bez parametru template
         return session?.getToken() ?? null;
       }
     }
@@ -39,6 +41,7 @@ export const createSupabaseClient = (session) => {
 /**
  * Pobiera oferty subskrypcji z możliwością filtrowania
  * @param {Object} filters - Filtry do zapytania
+ * @param {Object} authUser - Uwierzytelniony użytkownik Clerk (opcjonalnie)
  * @returns {Promise<Array>} - Lista ofert subskrypcji
  */
 export async function getSubscriptionOffers(filters = {}, authUser = null) {
