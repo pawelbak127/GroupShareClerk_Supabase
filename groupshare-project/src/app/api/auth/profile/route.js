@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
+import { createServerSupabaseClient } from '@/lib/supabase-server';
 
 /**
  * GET /api/auth/profile
@@ -22,29 +23,70 @@ export async function GET() {
     
     console.log('Fetching profile for user:', user.id);
     
-    // Spróbuj znaleźć istniejący profil użytkownika
-    const { data: existingProfile, error } = await supabaseAdmin
-      .from('user_profiles')
-      .select('*')
-      .eq('external_auth_id', user.id)
-      .single();
+    // Try to get profile using authenticated client first
+    const supabaseAuth = createServerSupabaseClient();
     
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching user profile:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch user profile', details: error },
-        { status: 500 }
-      );
+    let existingProfile = null;
+    let profileError = null;
+    
+    try {
+      const { data, error } = await supabaseAuth
+        .from('user_profiles')
+        .select('*')
+        .eq('external_auth_id', user.id)
+        .single();
+        
+      if (!error) {
+        existingProfile = data;
+        console.log('Found existing profile with authenticated client');
+      } else if (error.code !== 'PGRST116') { // Ignore "not found" errors
+        profileError = error;
+        console.error('Error fetching profile with auth client:', error);
+      }
+    } catch (authError) {
+      console.error('Exception using auth client:', authError);
     }
     
-    // Jeśli profil istnieje, zwróć go
+    // Fallback to admin client if authenticated client failed
+    if (!existingProfile) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('user_profiles')
+          .select('*')
+          .eq('external_auth_id', user.id)
+          .single();
+        
+        if (!error) {
+          existingProfile = data;
+          console.log('Found existing profile with admin client');
+        } else if (error.code !== 'PGRST116') { // Ignore "not found" errors
+          console.error('Error fetching profile with admin client:', error);
+          
+          // If both methods failed with real errors, return the original auth error
+          if (profileError) {
+            return NextResponse.json(
+              { error: 'Failed to fetch user profile', details: profileError },
+              { status: 500 }
+            );
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user profile with admin client:', error);
+        return NextResponse.json(
+          { error: 'Failed to fetch user profile', details: error },
+          { status: 500 }
+        );
+      }
+    }
+    
+    // If profile exists, return it
     if (existingProfile) {
-      console.log('Found existing profile:', existingProfile.id);
       return NextResponse.json(existingProfile);
     }
     
-    // Jeśli profil nie istnieje, utwórz go
+    // If profile not found, create it using admin client
     console.log('No profile found, creating a new one');
+    
     const newProfile = {
       external_auth_id: user.id,
       display_name: user.firstName 
@@ -79,6 +121,103 @@ export async function GET() {
     return NextResponse.json(createdProfile);
   } catch (error) {
     console.error('Error in profile API:', error);
+    return NextResponse.json(
+      { error: 'An unexpected error occurred', details: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/auth/profile
+ * Tworzy profil użytkownika, gdy nie został utworzony automatycznie
+ */
+export async function POST(request) {
+  try {
+    const user = await currentUser();
+    
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+    
+    // Pobierz dane z żądania
+    const profileData = await request.json();
+    
+    // Upewnij się, że external_auth_id jest zgodny z bieżącym użytkownikiem
+    const userData = {
+      ...profileData,
+      external_auth_id: user.id // Wymuszenie poprawnego ID
+    };
+    
+    // Sprawdź, czy profil już istnieje
+    const { data: existingProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id')
+      .eq('external_auth_id', user.id)
+      .single();
+    
+    if (existingProfile) {
+      // Zaktualizuj istniejący profil
+      const { data: updatedProfile, error } = await supabaseAdmin
+        .from('user_profiles')
+        .update({
+          display_name: userData.display_name,
+          email: userData.email,
+          phone_number: userData.phone_number,
+          bio: userData.bio,
+          avatar_url: userData.avatar_url,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingProfile.id)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Error updating profile:', error);
+        return NextResponse.json(
+          { error: 'Failed to update profile', details: error },
+          { status: 500 }
+        );
+      }
+      
+      return NextResponse.json(updatedProfile);
+    }
+    
+    // Utwórz nowy profil
+    const newProfile = {
+      external_auth_id: user.id,
+      display_name: userData.display_name || 'Nowy użytkownik',
+      email: userData.email || '',
+      phone_number: userData.phone_number || null,
+      profile_type: userData.profile_type || 'both',
+      verification_level: userData.verification_level || 'basic',
+      bio: userData.bio || '',
+      avatar_url: userData.avatar_url || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    // Wstaw profil za pomocą supabaseAdmin, aby ominąć RLS
+    const { data: createdProfile, error } = await supabaseAdmin
+      .from('user_profiles')
+      .insert([newProfile])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating profile:', error);
+      return NextResponse.json(
+        { error: 'Failed to create profile', details: error },
+        { status: 500 }
+      );
+    }
+    
+    return NextResponse.json(createdProfile);
+  } catch (error) {
+    console.error('Error in create profile API:', error);
     return NextResponse.json(
       { error: 'An unexpected error occurred', details: error.message },
       { status: 500 }

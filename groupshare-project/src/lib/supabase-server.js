@@ -24,16 +24,15 @@ export function createServerSupabaseClient() {
       },
       async accessToken() {
         try {
-          // W najnowszej wersji Clerk, auth() nie ma bezpośrednio metody getToken()
-          // Zamiast tego, sam obiekt auth jest funkcją, którą można użyć do pobrania tokenu
-          const authObject = auth();
-          if (!authObject) {
+          // Pobierz instancję auth z Clerk
+          const authInstance = auth();
+          if (!authInstance) {
             console.log('No auth instance available in server context');
             return null;
           }
           
-          // W aktualnej wersji Clerk token jest tak pobierany
-          return await authObject.getToken({ template: 'supabase' });
+          // Pobierz token bez parametru template zgodnie z nową integracją
+          return await authInstance.getToken();
         } catch (error) {
           console.error('Error getting token in server context:', error);
           return null;

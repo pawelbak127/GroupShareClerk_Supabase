@@ -15,10 +15,11 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
     autoRefreshToken: false,
     persistSession: false
   },
-  // Ustaw globalny header do omijania RLS
+  // Ustaw globalne nagłówki do omijania RLS i debugowania
   global: {
     headers: {
-      'x-supabase-bypass-rls': 'true'
+      'x-supabase-bypass-rls': 'true',
+      'x-supabase-client': 'admin-client'
     }
   }
 });

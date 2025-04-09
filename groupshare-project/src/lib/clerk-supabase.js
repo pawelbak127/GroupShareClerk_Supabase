@@ -1,4 +1,3 @@
-// TEN PLIK JEST UŻYWANY TYLKO PO STRONIE SERWERA
 import { createClient } from '@supabase/supabase-js';
 import { auth } from '@clerk/nextjs/server';
 
@@ -11,17 +10,29 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 /**
  * Tworzy klienta Supabase z uwierzytelnianiem Clerk
- * TYLKO DO UŻYTKU W KOMPONENTACH SERWEROWYCH
+ * używając nowej integracji Clerk-Supabase
  * 
+ * Obsługuje zarówno środowisko klienta jak i serwera
+ * 
+ * @param {Object} user - Obiekt użytkownika Clerk (opcjonalny)
  * @returns {Object} Klient Supabase z uwierzytelnianiem
  */
-export async function getAuthenticatedSupabaseClient() {
+export async function getAuthenticatedSupabaseClient(user = null) {
   try {
-    // Użyj API auth() z Clerk
-    const authInstance = auth();
-    if (!authInstance) {
-      console.warn('No Clerk auth instance available, returning anonymous client');
-      return createClient(supabaseUrl, supabaseAnonKey);
+    // Jeśli nie dostarczono użytkownika, próbujemy użyć auth()
+    let authInstance;
+    
+    if (!user) {
+      try {
+        authInstance = auth();
+        if (!authInstance) {
+          console.log('No auth instance available, returning anonymous client');
+          return createClient(supabaseUrl, supabaseAnonKey);
+        }
+      } catch (error) {
+        console.warn('Failed to get auth instance:', error);
+        return createClient(supabaseUrl, supabaseAnonKey);
+      }
     }
     
     // Utwórz klienta używając nowej metody integracji
@@ -30,7 +41,7 @@ export async function getAuthenticatedSupabaseClient() {
       supabaseAnonKey,
       {
         global: {
-          // Ustaw stałe nagłówki dla wszystkich zapytań
+          // Stałe nagłówki dla wszystkich zapytań
           headers: {
             'x-clerk-auth-reason': 'supabase-integration'
           }
@@ -39,13 +50,19 @@ export async function getAuthenticatedSupabaseClient() {
           persistSession: false,
           autoRefreshToken: false
         },
-        // Pobierz token z Clerk z parametrem template
+        // Kluczowa zmiana - funkcja accessToken zwracająca token z Clerk bez parametru template
         async accessToken() {
           try {
-            // Pobierz token bezpośrednio z instancji auth()
-            return await authInstance.getToken({ template: 'supabase' });
+            if (user && typeof user.getToken === 'function') {
+              // Jeśli mamy bezpośrednio użytkownika z metodą getToken
+              return await user.getToken();
+            } else if (authInstance) {
+              // Albo używamy instancji auth()
+              return await authInstance.getToken();
+            }
+            return null;
           } catch (error) {
-            console.warn('Failed to get token from auth instance:', error);
+            console.warn('Failed to get token:', error);
             return null;
           }
         }
@@ -55,4 +72,37 @@ export async function getAuthenticatedSupabaseClient() {
     console.error('Error creating authenticated Supabase client:', error);
     return createClient(supabaseUrl, supabaseAnonKey);
   }
+}
+
+/**
+ * Tworzy klienta Supabase z sesją Clerk
+ * zgodnie z nową integracją
+ * @param {Object} session - Sesja Clerk
+ * @returns {Object} Klient Supabase z uwierzytelnianiem
+ */
+export function createClerkSupabaseClient(session) {
+  if (!session) {
+    return createClient(supabaseUrl, supabaseAnonKey);
+  }
+  
+  return createClient(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      global: {
+        headers: {
+          'x-clerk-auth-reason': 'supabase-integration'
+        }
+      },
+      async accessToken() {
+        try {
+          // Pobierz token bez parametru template zgodnie z nową integracją
+          return await session.getToken();
+        } catch (error) {
+          console.warn('Failed to get token from session:', error);
+          return null;
+        }
+      }
+    }
+  );
 }

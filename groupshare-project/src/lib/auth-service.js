@@ -1,6 +1,7 @@
 import { currentUser, auth } from '@clerk/nextjs/server';
 import supabaseAdmin from './supabase-admin-client';
 import { createServerSupabaseClient } from './supabase-server';
+import { getAuthenticatedSupabaseClient } from './clerk-supabase';
 
 /**
  * Pobiera aktualny profil użytkownika z bazy danych
@@ -17,41 +18,72 @@ export async function getCurrentUserProfile() {
     
     console.log('Getting profile for user:', user.id);
     
-    // Tworzymy uwierzytelnionego klienta Supabase
-    const supabaseClient = createServerSupabaseClient();
+    // Tworzenie uwierzytelnionego klienta Supabase
+    let profile = null;
     
-    // Próbujemy najpierw pobrać profil używając uwierzytelnionego klienta
-    const { data: authData, error: authError } = await supabaseClient
-      .from('user_profiles')
-      .select('*')
-      .eq('external_auth_id', user.id)
-      .single();
+    // First, try with authenticated client (should work with proper setup)
+    try {
+      const supabaseAuth = await getAuthenticatedSupabaseClient(user);
       
-    if (!authError && authData) {
-      console.log('Found profile using authenticated client');
-      return authData;
-    }
-    
-    // Jeśli nie udało się pobrać z uwierzytelnionym klientem, używamy supabaseAdmin
-    const { data, error } = await supabaseAdmin
-      .from('user_profiles')
-      .select('*')
-      .eq('external_auth_id', user.id)
-      .single();
-    
-    if (error) {
-      // Ignorujemy błąd "nie znaleziono" (PGRST116)
-      if (error.code === 'PGRST116') {
-        console.log('No profile found for user:', user.id);
-        return null;
+      const { data, error } = await supabaseAuth
+        .from('user_profiles')
+        .select('*')
+        .eq('external_auth_id', user.id)
+        .single();
+        
+      if (!error) {
+        console.log('Found profile using authenticated client');
+        profile = data;
+      } else if (error.code !== 'PGRST116') { // Only log non-not-found errors
+        console.error('Error fetching user profile with auth client:', error);
       }
-      
-      console.error('Error fetching user profile:', error);
-      return null;
+    } catch (authError) {
+      console.error('Exception using auth client:', authError);
     }
     
-    console.log('Found profile for user:', user.id);
-    return data;
+    // If that failed, try with server client
+    if (!profile) {
+      try {
+        const supabaseClient = createServerSupabaseClient();
+        
+        const { data, error } = await supabaseClient
+          .from('user_profiles')
+          .select('*')
+          .eq('external_auth_id', user.id)
+          .single();
+          
+        if (!error) {
+          console.log('Found profile using server client');
+          profile = data;
+        } else if (error.code !== 'PGRST116') { // Only log non-not-found errors
+          console.error('Error fetching user profile with server client:', error);
+        }
+      } catch (serverError) {
+        console.error('Exception using server client:', serverError);
+      }
+    }
+    
+    // Finally, try with admin client as fallback
+    if (!profile) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('user_profiles')
+          .select('*')
+          .eq('external_auth_id', user.id)
+          .single();
+        
+        if (!error) {
+          console.log('Found profile using admin client');
+          profile = data;
+        } else if (error.code !== 'PGRST116') { // Only log non-not-found errors
+          console.error('Error fetching user profile with admin client:', error);
+        }
+      } catch (adminError) {
+        console.error('Exception using admin client:', adminError);
+      }
+    }
+    
+    return profile;
   } catch (error) {
     console.error('Exception in getCurrentUserProfile:', error);
     return null;
@@ -173,7 +205,7 @@ export async function getUserProfileWithAuth() {
     }
     
     // Użyj uwierzytelnionego klienta Supabase
-    const supabaseAuth = createServerSupabaseClient();
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
     
     const { data, error } = await supabaseAuth
       .from('user_profiles')
