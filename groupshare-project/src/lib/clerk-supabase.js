@@ -16,8 +16,13 @@ export async function getAuthenticatedSupabaseClient(user) {
   if (!user) return createClient(supabaseUrl, supabaseAnonKey);
   
   try {
-    // Zgodnie z nową integracją - pobierz standardowy token bez parametru template
+    // Zgodnie z nową integracją, pobieramy token bez parametru template
     const token = await user.getToken();
+    
+    if (!token) {
+      console.warn('Failed to get token from Clerk');
+      return createClient(supabaseUrl, supabaseAnonKey);
+    }
     
     // Utwórz klienta z tokenem Clerk
     return createClient(supabaseUrl, supabaseAnonKey, {
@@ -39,13 +44,20 @@ export async function getAuthenticatedSupabaseClient(user) {
  * @returns {Object} Klient Supabase z uwierzytelnianiem
  */
 export function createClerkSupabaseClient(session) {
+  if (!session) {
+    return createClient(supabaseUrl, supabaseAnonKey);
+  }
+  
   return createClient(
     supabaseUrl,
     supabaseAnonKey,
     {
-      async accessToken() {
-        return session?.getToken() ?? null;
-      },
+      global: {
+        headers: {
+          // W nowej integracji nie potrzebujemy parametru template
+          Authorization: `Bearer ${session.getToken()}`
+        }
+      }
     }
   );
 }

@@ -1,29 +1,41 @@
 import { currentUser } from '@clerk/nextjs/server';
 import supabase from './supabase-client';
 import supabaseAdmin from './supabase-admin-client';
-import { getAuthenticatedSupabaseClient } from './clerk-supabase';
+import { createServerSupabaseClient } from './supabase-server';
 
 /**
  * Pobiera aktualny profil użytkownika z bazy danych
  */
 export async function getCurrentUserProfile() {
-  const user = await currentUser();
-  
-  if (!user) return null;
-  
   try {
-    // Spróbuj pobrać istniejący profil używając supabaseAdmin (pomija RLS)
+    const user = await currentUser();
+    
+    if (!user) {
+      console.log('No authenticated user found');
+      return null;
+    }
+    
+    console.log('Getting profile for user:', user.id);
+    
+    // Używamy supabaseAdmin, które ma pełne uprawnienia (pomija RLS)
     const { data, error } = await supabaseAdmin
       .from('user_profiles')
       .select('*')
       .eq('external_auth_id', user.id)
       .single();
     
-    if (error && error.code !== 'PGRST116') {
+    if (error) {
+      // Ignorujemy błąd "nie znaleziono" (PGRST116)
+      if (error.code === 'PGRST116') {
+        console.log('No profile found for user:', user.id);
+        return null;
+      }
+      
       console.error('Error fetching user profile:', error);
       return null;
     }
     
+    console.log('Found profile for user:', user.id);
     return data;
   } catch (error) {
     console.error('Exception in getCurrentUserProfile:', error);
@@ -35,11 +47,16 @@ export async function getCurrentUserProfile() {
  * Pobiera profil użytkownika Clerk i tworzy go jeśli nie istnieje
  */
 export async function getOrCreateUserProfile() {
-  const user = await currentUser();
-  
-  if (!user) return null;
-  
   try {
+    const user = await currentUser();
+    
+    if (!user) {
+      console.log('No authenticated user found');
+      return null;
+    }
+    
+    console.log('Getting or creating profile for user:', user.id);
+    
     // Próba pobrania istniejącego profilu
     const userProfile = await getCurrentUserProfile();
     
@@ -47,6 +64,8 @@ export async function getOrCreateUserProfile() {
     if (userProfile) {
       return userProfile;
     }
+    
+    console.log('Creating new profile for user:', user.id);
     
     // W przeciwnym razie utwórz nowy profil
     const newProfile = {
@@ -76,6 +95,7 @@ export async function getOrCreateUserProfile() {
       return null;
     }
     
+    console.log('Successfully created profile for user:', user.id);
     return createdProfile;
   } catch (error) {
     console.error('Error in getOrCreateUserProfile:', error);

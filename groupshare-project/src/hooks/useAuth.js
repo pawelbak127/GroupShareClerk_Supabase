@@ -2,7 +2,11 @@
 
 import { useState, useEffect, createContext, useContext } from 'react';
 import { useUser, useAuth as useClerkAuth, useSession } from '@clerk/nextjs';
-import { createClerkSupabaseClient } from '../lib/clerk-supabase';
+import { createClient } from '@supabase/supabase-js';
+import supabase from '../lib/supabase-client';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 const AuthContext = createContext(null);
 
@@ -12,16 +16,32 @@ export function AuthProvider({ children }) {
   const { session } = useSession();
   const [profile, setProfile] = useState(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const [supabase, setSupabase] = useState(null);
+  const [supabaseClient, setSupabaseClient] = useState(null);
 
   // Tworzy klienta Supabase z wykorzystaniem nowej integracji Clerk
   useEffect(() => {
-    setSupabase(createClerkSupabaseClient(session));
+    if (session) {
+      // Używając nowej integracji - prostszy sposób tworzenia klienta
+      const client = createClient(
+        supabaseUrl,
+        supabaseAnonKey,
+        {
+          global: {
+            headers: {
+              Authorization: `Bearer ${session.getToken()}`
+            }
+          }
+        }
+      );
+      setSupabaseClient(client);
+    } else {
+      setSupabaseClient(supabase);
+    }
   }, [session]);
 
   // Pobiera profil użytkownika
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || !supabase) {
+    if (!isLoaded || !isSignedIn) {
       setProfile(null);
       setIsLoadingProfile(false);
       return;
@@ -30,13 +50,24 @@ export function AuthProvider({ children }) {
     const fetchProfile = async () => {
       try {
         setIsLoadingProfile(true);
+        console.log('Fetching profile for user:', user?.id);
+        
+        // Używamy API endpoint do pobrania profilu
         const response = await fetch('/api/auth/profile');
         
         if (response.ok) {
           const data = await response.json();
+          console.log('Profile fetched successfully:', data);
           setProfile(data);
         } else {
-          console.error('Failed to fetch profile');
+          const errorData = await response.json();
+          console.error('Failed to fetch profile:', errorData);
+          
+          // Jeśli API zwróciło błąd, spróbujmy utworzyć profil
+          if (response.status === 404) {
+            console.log('Profile not found, attempting to create...');
+            await createProfileViaAPI();
+          }
         }
       } catch (error) {
         console.error('Error fetching profile:', error);
@@ -45,8 +76,38 @@ export function AuthProvider({ children }) {
       }
     };
 
+    const createProfileViaAPI = async () => {
+      if (!user) return;
+      
+      try {
+        const newProfile = {
+          display_name: user.fullName || 
+            (user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : 'Nowy Użytkownik'),
+          email: user.primaryEmailAddress?.emailAddress || '',
+          avatar_url: user.imageUrl || null
+        };
+        
+        // Próba utworzenia profilu przez API
+        const response = await fetch('/api/auth/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newProfile)
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Profile created successfully:', data);
+          setProfile(data);
+        } else {
+          console.error('Failed to create profile via API');
+        }
+      } catch (error) {
+        console.error('Error creating profile:', error);
+      }
+    };
+
     fetchProfile();
-  }, [isSignedIn, isLoaded, user?.id, supabase]);
+  }, [isSignedIn, isLoaded, user]);
 
   return (
     <AuthContext.Provider 
@@ -57,7 +118,7 @@ export function AuthProvider({ children }) {
         isSignedIn,
         isLoadingProfile,
         isLoading: isLoadingProfile || !isLoaded,
-        supabase,
+        supabase: supabaseClient,
         session
       }}
     >
