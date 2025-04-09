@@ -3,7 +3,6 @@ import { NextResponse } from 'next/server';
 import { currentUser, auth } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
 import { createServerSupabaseClient } from '@/lib/supabase-server';
-import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
 
 /**
  * GET /api/debug/verify-integration
@@ -32,18 +31,20 @@ export async function GET(request) {
     // Pobierz token z Clerk - zgodnie z nową integracją
     let token, tokenError;
     try {
-      // Użyj bezpośrednio auth().getToken()
+      // Użyj bezpośrednio auth()
       const authInstance = auth();
-      token = await authInstance.getToken();
+      if (authInstance) {
+        // Używamy z parametrem template
+        token = await authInstance.getToken({ template: 'supabase' });
+      } else {
+        tokenError = "No auth instance available";
+      }
     } catch (error) {
       tokenError = error.message;
     }
     
     // Utwórz klienta Supabase na serwerze
     const supabaseServer = createServerSupabaseClient();
-    
-    // Utwórz uwierzytelnionego klienta Supabase
-    const supabaseAuth = await getAuthenticatedSupabaseClient();
     
     // Sprawdź, czy funkcja auth.clerk_user_id() działa
     let clerkUserId, clerkUserIdError;
@@ -74,40 +75,6 @@ export async function GET(request) {
       }
     } catch (error) {
       userProfileError = error.message;
-    }
-    
-    // Sprawdź, czy możemy uzyskać dostęp do tabeli user_profiles za pomocą uwierzytelnionego klienta
-    let userProfileAccess, userProfileAccessError;
-    try {
-      const { data, error } = await supabaseAuth
-        .from('user_profiles')
-        .select('*')
-        .limit(1);
-      
-      if (error) {
-        userProfileAccessError = error.message;
-      } else {
-        userProfileAccess = data;
-      }
-    } catch (error) {
-      userProfileAccessError = error.message;
-    }
-    
-    // Testuj zapytania do innych tabel (groups, group_subs)
-    let groupsAccess, groupsAccessError;
-    try {
-      const { data, error } = await supabaseAuth
-        .from('groups')
-        .select('*')
-        .limit(1);
-      
-      if (error) {
-        groupsAccessError = error.message;
-      } else {
-        groupsAccess = data;
-      }
-    } catch (error) {
-      groupsAccessError = error.message;
     }
     
     // Testuj zapytania do tabeli user_profiles z supabaseAdmin
@@ -165,7 +132,6 @@ export async function GET(request) {
         clerk_user: user ? 'ok' : 'error',
         jwt_token: token ? 'ok' : 'error',
         supabase_client: supabaseServer ? 'ok' : 'error',
-        supabase_auth_client: supabaseAuth ? 'ok' : 'error',
         dev_mode: devModeStatus
       },
       clerk: {
@@ -187,23 +153,11 @@ export async function GET(request) {
           exists: userProfile ? true : false,
           error: userProfileError || null
         },
-        access_tests: {
+        admin_access: {
           user_profiles: {
-            authenticated: userProfileAccess ? 'ok' : 'failed',
-            error: userProfileAccessError || null,
-            count: userProfileAccess?.length || 0
-          },
-          groups: {
-            authenticated: groupsAccess ? 'ok' : 'failed',
-            error: groupsAccessError || null,
-            count: groupsAccess?.length || 0
-          },
-          admin_access: {
-            user_profiles: {
-              authenticated: adminUserProfileAccess ? 'ok' : 'failed',
-              error: adminUserProfileAccessError || null,
-              count: adminUserProfileAccess?.length || 0
-            }
+            authenticated: adminUserProfileAccess ? 'ok' : 'failed',
+            error: adminUserProfileAccessError || null,
+            count: adminUserProfileAccess?.length || 0
           }
         },
         auth_status: clerkUserId,

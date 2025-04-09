@@ -2,11 +2,8 @@
 
 import { useState, useEffect, createContext, useContext } from 'react';
 import { useUser, useAuth as useClerkAuth, useSession } from '@clerk/nextjs';
-import { createClient } from '@supabase/supabase-js';
 import supabase from '../lib/supabase-client';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+import { createSupabaseClient } from '../lib/supabase-client';
 
 const AuthContext = createContext(null);
 
@@ -21,22 +18,8 @@ export function AuthProvider({ children }) {
   // Tworzy klienta Supabase z wykorzystaniem nowej integracji Clerk
   useEffect(() => {
     if (session) {
-      // Używamy nowej integracji z funkcją accessToken
-      const client = createClient(
-        supabaseUrl,
-        supabaseAnonKey,
-        {
-          async accessToken() {
-            try {
-              // Zgodnie z nową integracją, nie używamy parametru template
-              return await session.getToken();
-            } catch (error) {
-              console.warn('Failed to get token from session:', error);
-              return null;
-            }
-          }
-        }
-      );
+      // Używamy metody createSupabaseClient bezpiecznej dla komponentów klienckich
+      const client = createSupabaseClient(session);
       setSupabaseClient(client);
     } else {
       setSupabaseClient(supabase);

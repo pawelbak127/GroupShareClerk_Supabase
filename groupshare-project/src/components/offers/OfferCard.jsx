@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { useSession } from '@clerk/nextjs';
 import { toast } from 'react-hot-toast';
-import { createClerkSupabaseClient } from '@/lib/clerk-supabase';
+// Usunięto import createClerkSupabaseClient, który nie jest już potrzebny
 
 const OfferCard = ({ offer }) => {
   const router = useRouter();
