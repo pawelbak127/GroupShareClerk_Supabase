@@ -3,7 +3,7 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import { useUser, useAuth as useClerkAuth, useSession } from '@clerk/nextjs';
 import supabase from '../lib/supabase-client';
-import { createSupabaseClient } from '../lib/supabase-client';
+import { createClerkSupabaseClient } from '../lib/clerk-supabase';
 
 const AuthContext = createContext(null);
 
@@ -18,8 +18,7 @@ export function AuthProvider({ children }) {
   // Tworzy klienta Supabase z wykorzystaniem nowej integracji Clerk
   useEffect(() => {
     if (session) {
-      // Używamy metody createSupabaseClient bezpiecznej dla komponentów klienckich
-      const client = createSupabaseClient(session);
+      const client = createClerkSupabaseClient(session);
       setSupabaseClient(client);
     } else {
       setSupabaseClient(supabase);

@@ -12,8 +12,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * Tworzy klienta Supabase z uwierzytelnianiem Clerk
  * używając nowej integracji Clerk-Supabase
  * 
- * Obsługuje zarówno środowisko klienta jak i serwera
- * 
  * @param {Object} user - Obiekt użytkownika Clerk (opcjonalny)
  * @returns {Object} Klient Supabase z uwierzytelnianiem
  */
@@ -41,7 +39,6 @@ export async function getAuthenticatedSupabaseClient(user = null) {
       supabaseAnonKey,
       {
         global: {
-          // Stałe nagłówki dla wszystkich zapytań
           headers: {
             'x-clerk-auth-reason': 'supabase-integration'
           }
@@ -50,7 +47,7 @@ export async function getAuthenticatedSupabaseClient(user = null) {
           persistSession: false,
           autoRefreshToken: false
         },
-        // Kluczowa zmiana - funkcja accessToken zwracająca token z Clerk bez parametru template
+        // Kluczowa zmiana - funkcja accessToken bez parametru template
         async accessToken() {
           try {
             if (user && typeof user.getToken === 'function') {
