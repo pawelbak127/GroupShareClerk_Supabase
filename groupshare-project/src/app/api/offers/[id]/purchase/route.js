@@ -1,8 +1,8 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import supabase from '../../../../../lib/supabase-client';
-import { getOrCreateUserProfile } from '../../../../../lib/auth-service';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
+import { getOrCreateUserProfile } from '@/lib/auth-service';
 
 /**
  * POST /api/offers/[id]/purchase
@@ -21,7 +21,7 @@ export async function POST(request, { params }) {
       );
     }
     
-    // Pobierz lub utwórz profil użytkownika za pomocą standardowej funkcji
+    // Pobierz lub utwórz profil użytkownika
     const userProfile = await getOrCreateUserProfile();
     
     if (!userProfile) {
@@ -31,8 +31,11 @@ export async function POST(request, { params }) {
       );
     }
     
+    // Użyj uwierzytelnionego klienta Supabase
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    
     // Sprawdź ofertę i dostępność miejsc
-    const { data: offer, error: offerError } = await supabase
+    const { data: offer, error: offerError } = await supabaseAuth
       .from('group_subs')
       .select('*')
       .eq('id', id)
@@ -54,8 +57,8 @@ export async function POST(request, { params }) {
       );
     }
     
-    // Utwórz rekord zakupu
-    const { data: purchase, error: purchaseError } = await supabase
+    // Utwórz rekord zakupu używając uwierzytelnionego klienta
+    const { data: purchase, error: purchaseError } = await supabaseAuth
       .from('purchase_records')
       .insert({
         user_id: userProfile.id,

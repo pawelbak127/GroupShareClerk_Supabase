@@ -41,10 +41,17 @@ export const createSupabaseClient = (session) => {
  * @param {Object} filters - Filtry do zapytania
  * @returns {Promise<Array>} - Lista ofert subskrypcji
  */
-export async function getSubscriptionOffers(filters = {}) {
+export async function getSubscriptionOffers(filters = {}, authUser = null) {
   try {
+    // Wybierz odpowiedni klient Supabase (uwierzytelniony lub anonimowy)
+    let client = supabase;
+    
+    if (authUser) {
+      client = await getAuthenticatedSupabaseClient(authUser);
+    }
+    
     // Przygotowanie zapytania
-    let query = supabase
+    let query = client
       .from('group_subs')
       .select(`
         *,

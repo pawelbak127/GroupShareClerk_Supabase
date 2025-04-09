@@ -14,6 +14,9 @@ export async function GET(request) {
     // Parse query parameters
     const { searchParams } = new URL(request.url);
     
+    // Pobierz uwierzytelnionego użytkownika, jeśli dostępny
+    const user = await currentUser();
+    
     // Parse filters from query parameters
     const filters = {
       platformId: searchParams.get('platformId') || undefined,
@@ -26,8 +29,8 @@ export async function GET(request) {
       offset: searchParams.get('offset') ? parseInt(searchParams.get('offset')) : 0
     };
     
-    // Get subscription offers with filters
-    const offers = await getSubscriptionOffers(filters);
+    // Get subscription offers with filters, przekaż uwierzytelnionego użytkownika
+    const offers = await getSubscriptionOffers(filters, user);
     
     // Return the offers
     return NextResponse.json(offers);

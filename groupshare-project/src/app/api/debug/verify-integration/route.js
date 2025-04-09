@@ -3,12 +3,13 @@ import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
 import { createServerSupabaseClient } from '@/lib/supabase-server';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
 
 /**
  * GET /api/debug/verify-integration
  * Endpoint do weryfikacji poprawności integracji Clerk-Supabase
  */
-export async function GET() {
+export async function GET(request) {
   // Ten endpoint powinien być dostępny tylko w środowisku deweloperskim
   if (process.env.NODE_ENV !== 'development') {
     return NextResponse.json(
@@ -31,13 +32,18 @@ export async function GET() {
     // Pobierz token z Clerk - zgodnie z nową integracją
     let token, tokenError;
     try {
-      token = await user.getToken();
+      // Użyj sesji zamiast bezpośrednio user.getToken()
+      const userSession = await user.getSession();
+      token = userSession ? await userSession.getToken() : null;
     } catch (error) {
       tokenError = error.message;
     }
     
     // Utwórz klienta Supabase na serwerze
-    const supabaseServer = await createServerSupabaseClient();
+    const supabaseServer = createServerSupabaseClient();
+    
+    // Utwórz uwierzytelnionego klienta Supabase
+    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
     
     // Sprawdź, czy funkcja auth.clerk_user_id() działa
     let clerkUserId, clerkUserIdError;
@@ -73,7 +79,7 @@ export async function GET() {
     // Sprawdź, czy możemy uzyskać dostęp do tabeli user_profiles za pomocą uwierzytelnionego klienta
     let userProfileAccess, userProfileAccessError;
     try {
-      const { data, error } = await supabaseServer
+      const { data, error } = await supabaseAuth
         .from('user_profiles')
         .select('*')
         .limit(1);
@@ -90,7 +96,7 @@ export async function GET() {
     // Testuj zapytania do innych tabel (groups, group_subs)
     let groupsAccess, groupsAccessError;
     try {
-      const { data, error } = await supabaseServer
+      const { data, error } = await supabaseAuth
         .from('groups')
         .select('*')
         .limit(1);
@@ -139,6 +145,7 @@ export async function GET() {
         clerk_user: user ? 'ok' : 'error',
         jwt_token: token ? 'ok' : 'error',
         supabase_client: supabaseServer ? 'ok' : 'error',
+        supabase_auth_client: supabaseAuth ? 'ok' : 'error',
         dev_mode: devModeStatus
       },
       clerk: {

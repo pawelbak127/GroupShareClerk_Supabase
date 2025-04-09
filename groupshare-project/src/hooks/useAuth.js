@@ -21,14 +21,17 @@ export function AuthProvider({ children }) {
   // Tworzy klienta Supabase z wykorzystaniem nowej integracji Clerk
   useEffect(() => {
     if (session) {
-      // Używając nowej integracji - prostszy sposób tworzenia klienta
+      // Używając nowej integracji z accessToken
       const client = createClient(
         supabaseUrl,
         supabaseAnonKey,
         {
-          global: {
-            headers: {
-              Authorization: `Bearer ${session.getToken()}`
+          async accessToken() {
+            try {
+              return session.getToken();
+            } catch (error) {
+              console.warn('Failed to get token from session:', error);
+              return null;
             }
           }
         }

@@ -23,6 +23,13 @@ export async function GET(request) {
     const supabaseAuth = await getAuthenticatedSupabaseClient(user);
     const profile = await getCurrentUserProfile();
 
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'User profile not found' },
+        { status: 404 }
+      );
+    }
+
     // Pobierz grupy, których użytkownik jest członkiem
     const { data, error } = await supabaseAuth
       .from('group_members')
@@ -101,6 +108,13 @@ export async function POST(request) {
     // Get authenticated Supabase client
     const supabaseAuth = await getAuthenticatedSupabaseClient(user);
     const profile = await getCurrentUserProfile();
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'User profile not found' },
+        { status: 404 }
+      );
+    }
 
     // Pobierz dane żądania
     const body = await request.json();

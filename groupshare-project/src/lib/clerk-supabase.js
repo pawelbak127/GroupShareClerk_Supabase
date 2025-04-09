@@ -15,27 +15,26 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export async function getAuthenticatedSupabaseClient(user) {
   if (!user) return createClient(supabaseUrl, supabaseAnonKey);
   
-  try {
-    // Zgodnie z nową integracją, pobieramy token bez parametru template
-    const token = await user.getToken();
-    
-    if (!token) {
-      console.warn('Failed to get token from Clerk');
-      return createClient(supabaseUrl, supabaseAnonKey);
-    }
-    
-    // Utwórz klienta z tokenem Clerk
-    return createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`
+  // Użyj podejścia z funkcją accessToken zgodnie z nową integracją
+  return createClient(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      async accessToken() {
+        try {
+          // Pobierz sesję i token bezpośrednio z sesji
+          const userSession = await user.getSession();
+          if (userSession) {
+            return userSession.getToken();
+          }
+          return null;
+        } catch (error) {
+          console.warn('Failed to get token from Clerk:', error);
+          return null;
         }
       }
-    });
-  } catch (error) {
-    console.error('Error getting authenticated Supabase client:', error);
-    return createClient(supabaseUrl, supabaseAnonKey);
-  }
+    }
+  );
 }
 
 /**
@@ -52,10 +51,12 @@ export function createClerkSupabaseClient(session) {
     supabaseUrl,
     supabaseAnonKey,
     {
-      global: {
-        headers: {
-          // W nowej integracji nie potrzebujemy parametru template
-          Authorization: `Bearer ${session.getToken()}`
+      async accessToken() {
+        try {
+          return session.getToken();
+        } catch (error) {
+          console.warn('Failed to get token from session:', error);
+          return null;
         }
       }
     }

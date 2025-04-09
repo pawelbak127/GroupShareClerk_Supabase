@@ -12,38 +12,25 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * Tworzy klienta Supabase dla użycia po stronie serwera
  * zgodnie z nową integracją Clerk-Supabase
  */
-export async function createServerSupabaseClient() {
-  try {
-    const authInstance = auth();
-    
-    if (!authInstance) {
-      console.log('No auth instance available');
-      return createClient(supabaseUrl, supabaseAnonKey);
-    }
-    
-    // Zgodnie z nową integracją, używamy metody getToken() bez parametrów
-    const token = await authInstance.getToken();
-    
-    if (!token) {
-      console.log('No token received from Clerk');
-      return createClient(supabaseUrl, supabaseAnonKey);
-    }
-    
-    console.log('Creating authenticated server Supabase client');
-    
-    return createClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${token}`
+export function createServerSupabaseClient() {
+  return createClient(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      async accessToken() {
+        try {
+          const authInstance = auth();
+          if (!authInstance) {
+            console.log('No auth instance available in server context');
+            return null;
           }
-        },
+          
+          return authInstance.getToken();
+        } catch (error) {
+          console.error('Error getting token in server context:', error);
+          return null;
+        }
       }
-    );
-  } catch (error) {
-    console.error('Error creating server Supabase client:', error);
-    return createClient(supabaseUrl, supabaseAnonKey);
-  }
+    }
+  );
 }
