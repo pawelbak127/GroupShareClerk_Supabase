@@ -1,7 +1,6 @@
-import { currentUser } from '@clerk/nextjs/server';
+import { currentUser, clerkClient } from '@clerk/nextjs/server';
 import supabaseAdmin from './supabase-admin-client';
 import { createServerSupabaseClient } from './supabase-server';
-import { getAuthenticatedSupabaseClient } from './clerk-supabase-server';
 
 /**
  * Pobiera aktualny profil użytkownika z bazy danych
@@ -18,30 +17,32 @@ export async function getCurrentUserProfile() {
     
     console.log('Getting profile for user:', user.id);
     
-    // Tworzenie uwierzytelnionego klienta Supabase
+    // Próbujemy najpierw z supabaseAdmin, który zawsze powinien działać
     let profile = null;
     
-    // First, try with authenticated client (should work with proper setup)
     try {
-      const supabaseAuth = await getAuthenticatedSupabaseClient();
-      
-      const { data, error } = await supabaseAuth
+      const { data, error } = await supabaseAdmin
         .from('user_profiles')
         .select('*')
         .eq('external_auth_id', user.id)
         .single();
-        
+      
       if (!error) {
-        console.log('Found profile using authenticated client');
+        console.log('Found profile using admin client');
         profile = data;
       } else if (error.code !== 'PGRST116') { // Only log non-not-found errors
-        console.error('Error fetching user profile with auth client:', error);
+        console.error('Error fetching user profile with admin client:', error);
       }
-    } catch (authError) {
-      console.error('Exception using auth client:', authError);
+    } catch (adminError) {
+      console.error('Exception using admin client:', adminError);
     }
     
-    // If that failed, try with server client
+    // Jeśli znaleźliśmy profil, zwróć go
+    if (profile) {
+      return profile;
+    }
+    
+    // Próbujemy z createServerSupabaseClient
     if (!profile) {
       try {
         const supabaseClient = await createServerSupabaseClient();
@@ -63,24 +64,9 @@ export async function getCurrentUserProfile() {
       }
     }
     
-    // Finally, try with admin client as fallback
+    // Jeśli wciąż nie znaleźliśmy profilu, zwracamy null
     if (!profile) {
-      try {
-        const { data, error } = await supabaseAdmin
-          .from('user_profiles')
-          .select('*')
-          .eq('external_auth_id', user.id)
-          .single();
-        
-        if (!error) {
-          console.log('Found profile using admin client');
-          profile = data;
-        } else if (error.code !== 'PGRST116') { // Only log non-not-found errors
-          console.error('Error fetching user profile with admin client:', error);
-        }
-      } catch (adminError) {
-        console.error('Exception using admin client:', adminError);
-      }
+      console.log('Profile not found for user:', user.id);
     }
     
     return profile;
@@ -89,8 +75,6 @@ export async function getCurrentUserProfile() {
     return null;
   }
 }
-
-// Reszta funkcji bez zmian
 
 /**
  * Pobiera profil użytkownika Clerk i tworzy go jeśli nie istnieje
@@ -191,68 +175,5 @@ export async function updateUserProfile(userId, profileData) {
   } catch (error) {
     console.error('Exception in updateUserProfile:', error);
     throw error;
-  }
-}
-
-/**
- * Pobiera profil użytkownika używając uwierzytelnionego klienta
- */
-export async function getUserProfileWithAuth() {
-  try {
-    const user = await currentUser();
-    
-    if (!user) {
-      console.log('No authenticated user found');
-      return null;
-    }
-    
-    // Użyj uwierzytelnionego klienta Supabase
-    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
-    
-    const { data, error } = await supabaseAuth
-      .from('user_profiles')
-      .select('*')
-      .eq('external_auth_id', user.id)
-      .single();
-    
-    if (error) {
-      console.error('Error fetching user profile with auth:', error);
-      return null;
-    }
-    
-    return data;
-  } catch (error) {
-    console.error('Exception in getUserProfileWithAuth:', error);
-    return null;
-  }
-}
-
-/**
- * Sprawdza, czy użytkownik ma prawidłową sesję Clerk
- */
-export async function verifyUserSession() {
-  try {
-    const user = await currentUser();
-    
-    if (!user) {
-      return false;
-    }
-    
-    // Sprawdź, czy możemy pobrać token
-    try {
-      const authInstance = auth();
-      if (!authInstance) {
-        return false;
-      }
-      
-      const token = await authInstance.getToken();
-      return !!token;
-    } catch (error) {
-      console.error('Error verifying user session:', error);
-      return false;
-    }
-  } catch (error) {
-    console.error('Exception in verifyUserSession:', error);
-    return false;
   }
 }

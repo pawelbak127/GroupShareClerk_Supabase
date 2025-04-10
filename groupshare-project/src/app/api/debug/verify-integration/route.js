@@ -29,22 +29,21 @@ export async function GET(request) {
     }
     
     // Pobierz token z Clerk - zgodnie z nową integracją
+    const authObject = auth();
     let token, tokenError;
+    
     try {
-      // Użyj bezpośrednio auth()
-      const authInstance = auth();
-      if (authInstance) {
-        // Używamy z parametrem template
-        token = await authInstance.getToken({ template: 'supabase' });
+      if (authObject) {
+        token = await authObject.getToken();
       } else {
-        tokenError = "No auth instance available";
+        tokenError = "No auth object available";
       }
     } catch (error) {
       tokenError = error.message;
     }
     
     // Utwórz klienta Supabase na serwerze
-    const supabaseServer = createServerSupabaseClient();
+    const supabaseServer = await createServerSupabaseClient();
     
     // Sprawdź, czy funkcja auth.clerk_user_id() działa
     let clerkUserId, clerkUserIdError;
@@ -94,6 +93,19 @@ export async function GET(request) {
       adminUserProfileAccessError = error.message;
     }
     
+    // Testuj wykonanie funkcji SQL w Supabase
+    let sqlFunctionResult, sqlFunctionError;
+    try {
+      const { data, error } = await supabaseAdmin.rpc('ensure_role_in_jwt_claims');
+      if (error) {
+        sqlFunctionError = error.message;
+      } else {
+        sqlFunctionResult = data;
+      }
+    } catch (error) {
+      sqlFunctionError = error.message;
+    }
+    
     // Włącz tryb deweloperski w Supabase (opcjonalnie)
     let devModeStatus = "not_attempted";
     try {
@@ -127,6 +139,16 @@ export async function GET(request) {
       }
     }
     
+    // Sprawdź konfigurację zmiennych środowiskowych
+    const envVars = {
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'set' : 'missing',
+      NEXT_PUBLIC_SUPABASE_KEY: process.env.NEXT_PUBLIC_SUPABASE_KEY ? 'set' : 'missing',
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'set' : 'missing',
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'set' : 'missing',
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? 'set' : 'missing',
+      CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ? 'set' : 'missing'
+    };
+    
     return NextResponse.json({
       integration_status: {
         clerk_user: user ? 'ok' : 'error',
@@ -134,6 +156,7 @@ export async function GET(request) {
         supabase_client: supabaseServer ? 'ok' : 'error',
         dev_mode: devModeStatus
       },
+      environment: envVars,
       clerk: {
         user: {
           id: user.id,
@@ -159,6 +182,10 @@ export async function GET(request) {
             error: adminUserProfileAccessError || null,
             count: adminUserProfileAccess?.length || 0
           }
+        },
+        sql_function: {
+          result: sqlFunctionResult,
+          error: sqlFunctionError
         },
         auth_status: clerkUserId,
         auth_status_error: clerkUserIdError || null

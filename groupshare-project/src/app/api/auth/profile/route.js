@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
-import { createServerSupabaseClient } from '@/lib/supabase-server';
 
 /**
  * GET /api/auth/profile
@@ -23,14 +22,12 @@ export async function GET() {
     
     console.log('Fetching profile for user:', user.id);
     
-    // Try to get profile using authenticated client first
-    const supabaseAuth = createServerSupabaseClient();
-    
+    // Pobierz profil bezpośrednio używając supabaseAdmin (omijając RLS)
     let existingProfile = null;
     let profileError = null;
     
     try {
-      const { data, error } = await supabaseAuth
+      const { data, error } = await supabaseAdmin
         .from('user_profiles')
         .select('*')
         .eq('external_auth_id', user.id)
@@ -38,45 +35,14 @@ export async function GET() {
         
       if (!error) {
         existingProfile = data;
-        console.log('Found existing profile with authenticated client');
+        console.log('Found existing profile with admin client');
       } else if (error.code !== 'PGRST116') { // Ignore "not found" errors
         profileError = error;
-        console.error('Error fetching profile with auth client:', error);
+        console.error('Error fetching profile with admin client:', error);
       }
-    } catch (authError) {
-      console.error('Exception using auth client:', authError);
-    }
-    
-    // Fallback to admin client if authenticated client failed
-    if (!existingProfile) {
-      try {
-        const { data, error } = await supabaseAdmin
-          .from('user_profiles')
-          .select('*')
-          .eq('external_auth_id', user.id)
-          .single();
-        
-        if (!error) {
-          existingProfile = data;
-          console.log('Found existing profile with admin client');
-        } else if (error.code !== 'PGRST116') { // Ignore "not found" errors
-          console.error('Error fetching profile with admin client:', error);
-          
-          // If both methods failed with real errors, return the original auth error
-          if (profileError) {
-            return NextResponse.json(
-              { error: 'Failed to fetch user profile', details: profileError },
-              { status: 500 }
-            );
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching user profile with admin client:', error);
-        return NextResponse.json(
-          { error: 'Failed to fetch user profile', details: error },
-          { status: 500 }
-        );
-      }
+    } catch (error) {
+      console.error('Exception using admin client:', error);
+      profileError = error;
     }
     
     // If profile exists, return it
