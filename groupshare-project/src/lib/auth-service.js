@@ -1,7 +1,7 @@
-import { currentUser, auth } from '@clerk/nextjs/server';
+import { currentUser } from '@clerk/nextjs/server';
 import supabaseAdmin from './supabase-admin-client';
 import { createServerSupabaseClient } from './supabase-server';
-import { getAuthenticatedSupabaseClient } from './clerk-supabase';
+import { getAuthenticatedSupabaseClient } from './clerk-supabase-server';
 
 /**
  * Pobiera aktualny profil użytkownika z bazy danych
@@ -23,7 +23,7 @@ export async function getCurrentUserProfile() {
     
     // First, try with authenticated client (should work with proper setup)
     try {
-      const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+      const supabaseAuth = await getAuthenticatedSupabaseClient();
       
       const { data, error } = await supabaseAuth
         .from('user_profiles')
@@ -44,7 +44,7 @@ export async function getCurrentUserProfile() {
     // If that failed, try with server client
     if (!profile) {
       try {
-        const supabaseClient = createServerSupabaseClient();
+        const supabaseClient = await createServerSupabaseClient();
         
         const { data, error } = await supabaseClient
           .from('user_profiles')
@@ -89,6 +89,8 @@ export async function getCurrentUserProfile() {
     return null;
   }
 }
+
+// Reszta funkcji bez zmian
 
 /**
  * Pobiera profil użytkownika Clerk i tworzy go jeśli nie istnieje

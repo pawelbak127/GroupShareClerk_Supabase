@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase-server';
 import { getOrCreateUserProfile } from '@/lib/auth-service';
 
 /**

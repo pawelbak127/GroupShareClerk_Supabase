@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { getCurrentUserProfile } from '@/lib/auth-service';
-import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase-server';
 
 /**
  * GET /api/groups/[id]

@@ -1,10 +1,18 @@
+// src/app/page.jsx
 import Link from 'next/link';
 import Image from 'next/image';
 import { currentUser } from '@clerk/nextjs/server';
 
 export default async function Home() {
   // Używamy currentUser zamiast auth()
-  const user = await currentUser();
+  let user = null;
+  try {
+    user = await currentUser();
+  } catch (error) {
+    console.error('Error fetching current user:', error);
+    // Kontynuuj bez użytkownika
+  }
+  
   const userId = user?.id;
   
   return (

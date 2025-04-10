@@ -1,9 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { currentUser, auth } from '@clerk/nextjs/server';
+import { currentUser } from '@clerk/nextjs/server';
 import { getCurrentUserProfile } from '../../../lib/auth-service';
-import { createServerSupabaseClient } from '../../../lib/supabase-server';
-import { getAuthenticatedSupabaseClient } from '../../../lib/clerk-supabase';
 import supabaseAdmin from '../../../lib/supabase-admin-client';
 
 /**
@@ -15,35 +13,8 @@ export async function GET(request) {
     // Parse query parameters
     const { searchParams } = new URL(request.url);
     
-    // Try multiple approaches to get Supabase client with auth
-    let supabaseClient;
-    
-    // First try to get authenticated client with current user
-    try {
-      const user = await currentUser();
-      if (user) {
-        supabaseClient = await getAuthenticatedSupabaseClient(user);
-        console.log("Using authenticated client with currentUser");
-      }
-    } catch (e) {
-      console.warn("Failed to get authenticated client with currentUser:", e.message);
-    }
-    
-    // If that failed, try with createServerSupabaseClient
-    if (!supabaseClient) {
-      try {
-        supabaseClient = createServerSupabaseClient();
-        console.log("Using server Supabase client");
-      } catch (e) {
-        console.warn("Failed to create server Supabase client:", e.message);
-      }
-    }
-    
-    // Fallback to admin client if all else fails
-    if (!supabaseClient) {
-      console.log("Falling back to admin client");
-      supabaseClient = supabaseAdmin;
-    }
+    // Używaj bezpośrednio supabaseAdmin zamiast prób z wieloma klientami
+    let supabaseClient = supabaseAdmin;
     
     // Parse filters from query parameters
     const filters = {
@@ -102,81 +73,26 @@ export async function GET(request) {
       query = query.offset(filters.offset);
     }
     
-    // Wykonaj zapytanie
-    const { data, error } = await query;
-    
-    if (error) {
-      console.error('Error fetching subscription offers:', error);
+    try {
+      // Wykonaj zapytanie
+      const { data, error } = await query;
       
-      // If authentication error, try with admin client
-      if (error.code === '42501' && supabaseClient !== supabaseAdmin) {
-        console.log('Permission denied, trying with admin client');
-        
-        // Create the same query with admin client
-        let adminQuery = supabaseAdmin
-          .from('group_subs')
-          .select(`
-            *,
-            subscription_platforms(*),
-            groups(id, name, description),
-            owner:groups!inner(owner_id, user_profiles!inner(id, display_name, avatar_url, rating_avg, rating_count, verification_level))
-          `)
-          .eq('status', 'active');
-        
-        // Add the same filters
-        if (filters.platformId) {
-          adminQuery = adminQuery.eq('platform_id', filters.platformId);
-        }
-        
-        if (filters.minPrice !== undefined && !isNaN(filters.minPrice)) {
-          adminQuery = adminQuery.gte('price_per_slot', filters.minPrice);
-        }
-        
-        if (filters.maxPrice !== undefined && !isNaN(filters.maxPrice)) {
-          adminQuery = adminQuery.lte('price_per_slot', filters.maxPrice);
-        }
-        
-        if (filters.availableSlots !== false) {
-          adminQuery = adminQuery.gt('slots_available', 0);
-        }
-        
-        // Sorting
-        adminQuery = adminQuery.order(orderBy, { ascending });
-        
-        // Limit and pagination
-        if (filters.limit) {
-          adminQuery = adminQuery.limit(filters.limit);
-        }
-        
-        if (filters.offset) {
-          adminQuery = adminQuery.offset(filters.offset);
-        }
-        
-        // Execute admin query
-        const { data: adminData, error: adminError } = await adminQuery;
-        
-        if (adminError) {
-          console.error('Error with admin client too:', adminError);
-          return NextResponse.json(
-            { 
-              error: error.message || 'Failed to fetch subscription offers', 
-              code: error.code || 'unknown', 
-              details: "Both regular and admin client failed"
-            }, 
-            { status: 500 }
-          );
-        }
-        
-        return NextResponse.json(adminData || []);
+      if (error) {
+        console.error('Error fetching subscription offers:', error);
+        return NextResponse.json(
+          { error: error.message || 'Failed to fetch subscription offers', code: error.code || 'unknown' }, 
+          { status: 500 }
+        );
       }
       
+      return NextResponse.json(data || []);
+    } catch (queryError) {
+      console.error('Exception executing query:', queryError);
       return NextResponse.json(
-        { error: error.message || 'Failed to fetch subscription offers', code: error.code || 'unknown' }, 
+        { error: 'Failed to execute database query', details: queryError.message }, 
         { status: 500 }
       );
     }
-    
-    return NextResponse.json(data || []);
   } catch (error) {
     console.error('Error fetching offers:', error);
     return NextResponse.json(
@@ -201,9 +117,14 @@ export async function POST(request) {
       );
     }
     
-    // Get authenticated client
-    const supabaseAuth = await getAuthenticatedSupabaseClient(user);
+    // Get user profile using admin client
     const profile = await getCurrentUserProfile();
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'User profile not found' },
+        { status: 404 }
+      );
+    }
     
     // Parse request body
     const body = await request.json();
@@ -246,72 +167,59 @@ export async function POST(request) {
       instant_access: true // All offers now have instant access
     };
     
-    let createdOffer;
-    
+    // Verify if user owns the group using admin client
     try {
-      // Create the offer in Supabase with auth client
-      const { data, error } = await supabaseAuth
+      const { data: groupData, error: groupError } = await supabaseAdmin
+        .from('groups')
+        .select('owner_id')
+        .eq('id', body.groupId)
+        .single();
+      
+      if (groupError) {
+        return NextResponse.json(
+          { error: 'Group not found or you do not have permission', details: groupError.message },
+          { status: 403 }
+        );
+      }
+      
+      if (groupData.owner_id !== profile.id) {
+        return NextResponse.json(
+          { error: 'You do not have permission to create offers for this group' },
+          { status: 403 }
+        );
+      }
+    } catch (groupCheckError) {
+      console.error('Error checking group ownership:', groupCheckError);
+      return NextResponse.json(
+        { error: 'Failed to verify group ownership', details: groupCheckError.message },
+        { status: 500 }
+      );
+    }
+    
+    // Create offer with admin client
+    let createdOffer;
+    try {
+      const { data, error } = await supabaseAdmin
         .from('group_subs')
         .insert(offerData)
         .select()
         .single();
       
-      if (error) throw error;
-      createdOffer = data;
-    } catch (authError) {
-      console.error('Error creating offer with auth client:', authError);
-      
-      // If auth client fails, try with admin client
-      if (authError.code === '42501') { // Permission denied
-        console.log('Permission denied, trying with admin client');
-        
-        // Verify if user owns the group first
-        const { data: groupData, error: groupError } = await supabaseAdmin
-          .from('groups')
-          .select('owner_id')
-          .eq('id', body.groupId)
-          .single();
-        
-        if (groupError) {
-          return NextResponse.json(
-            { error: 'Group not found or you do not have permission' },
-            { status: 403 }
-          );
-        }
-        
-        if (groupData.owner_id !== profile.id) {
-          return NextResponse.json(
-            { error: 'You do not have permission to create offers for this group' },
-            { status: 403 }
-          );
-        }
-        
-        // Create offer with admin client
-        const { data: adminData, error: adminError } = await supabaseAdmin
-          .from('group_subs')
-          .insert(offerData)
-          .select()
-          .single();
-        
-        if (adminError) {
-          console.error('Error creating offer with admin client:', adminError);
-          return NextResponse.json(
-            { error: adminError.message || 'Failed to create subscription offer' },
-            { status: 500 }
-          );
-        }
-        
-        createdOffer = adminData;
-      } else {
-        // For other errors, return the original error
+      if (error) {
+        console.error('Error creating offer:', error);
         return NextResponse.json(
-          { 
-            error: authError.message || 'Failed to create subscription offer',
-            code: authError.code
-          },
+          { error: error.message || 'Failed to create subscription offer', code: error.code },
           { status: 500 }
         );
       }
+      
+      createdOffer = data;
+    } catch (createError) {
+      console.error('Exception creating offer:', createError);
+      return NextResponse.json(
+        { error: 'Exception while creating offer', details: createError.message },
+        { status: 500 }
+      );
     }
     
     // Check result
@@ -325,7 +233,7 @@ export async function POST(request) {
     
     // Store access instructions
     try {
-      const instructionsResponse = await supabaseAdmin
+      const { error: instructionsError } = await supabaseAdmin
         .from('access_instructions')
         .insert({
           group_sub_id: createdOffer.id,
@@ -333,11 +241,11 @@ export async function POST(request) {
           updated_at: new Date().toISOString()
         });
       
-      if (instructionsResponse.error) {
-        console.error('Failed to save access instructions:', instructionsResponse.error);
+      if (instructionsError) {
+        console.error('Failed to save access instructions:', instructionsError);
       }
-    } catch (error) {
-      console.error('Error saving access instructions:', error);
+    } catch (instructionsError) {
+      console.error('Error saving access instructions:', instructionsError);
     }
     
     return NextResponse.json(createdOffer, { status: 201 });

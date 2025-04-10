@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import supabaseAdmin from '@/lib/supabase-admin-client';
-import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase';
+import { getAuthenticatedSupabaseClient } from '@/lib/clerk-supabase-server';
 
 /**
  * POST /api/purchases/[id]/confirm-access
