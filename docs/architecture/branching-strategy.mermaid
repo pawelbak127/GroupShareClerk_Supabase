@@ -1,0 +1,52 @@
+gitGraph
+   commit id: "Start"
+   branch architecture
+   checkout architecture
+   commit id: "Szkielet Clean Architecture"
+   branch domain
+   checkout domain
+   commit id: "Interfejsy repozytoriów"
+   commit id: "Encje User i Group"
+   commit id: "Encje Subscription"
+   commit id: "Encje Purchase i Access"
+   commit id: "Serwisy domenowe"
+   checkout architecture
+   merge domain
+   branch infrastructure
+   checkout infrastructure
+   commit id: "Bazowe repozytoria"
+   commit id: "Implementacje repozytoriów"
+   commit id: "Serwisy bezpieczeństwa"
+   commit id: "Serwisy zewnętrzne"
+   checkout architecture
+   merge infrastructure
+   branch application
+   checkout application
+   commit id: "DTO i mappery"
+   commit id: "UseCases - User"
+   commit id: "UseCases - Group"
+   commit id: "UseCases - Subscription"
+   commit id: "UseCases - Purchase"
+   commit id: "UseCases - Access"
+   checkout architecture
+   merge application
+   branch interface
+   checkout interface
+   commit id: "Kontrolery API"
+   commit id: "Komponenty UI - common"
+   commit id: "Komponenty UI - user"
+   commit id: "Komponenty UI - group"
+   commit id: "Komponenty UI - subscription"
+   commit id: "Komponenty UI - purchase"
+   commit id: "Hooki"
+   checkout architecture
+   merge interface
+   branch integration
+   checkout integration
+   commit id: "Testy integracyjne"
+   commit id: "Optymalizacje"
+   commit id: "Dokumentacja"
+   checkout architecture
+   merge integration
+   checkout main
+   merge architecture

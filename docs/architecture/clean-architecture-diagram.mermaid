@@ -1,0 +1,67 @@
+flowchart TD
+    subgraph Interface["Warstwa Interfejsu"]
+        Web["Web (Next.js)"]
+        APIRoutes["API Routes"]
+        Middleware["Middleware"]
+    end
+    
+    subgraph Application["Warstwa Aplikacji"]
+        subgraph UseCases["Przypadki Użycia"]
+            UserUseCases["User"]
+            GroupUseCases["Group"]
+            OfferUseCases["Offer"]
+            PurchaseUseCases["Purchase"]
+            AccessUseCases["Access"]
+        end
+        AppServices["Serwisy Aplikacyjne"]
+        DTOs["Obiekty Transferu Danych"]
+    end
+    
+    subgraph Domain["Warstwa Domeny"]
+        Entities["Encje"]
+        ValueObjects["Obiekty Wartości"]
+        Aggregates["Agregaty"]
+        DomainServices["Serwisy Domenowe"]
+        DomainEvents["Zdarzenia Domenowe"]
+        Repositories["Interfejsy Repozytoriów"]
+    end
+    
+    subgraph Infrastructure["Warstwa Infrastruktury"]
+        Persistence["Persystencja"]
+        Security["Bezpieczeństwo"]
+        ExternalServices["Usługi Zewnętrzne"]
+        Implementations["Implementacje Interfejsów"]
+    end
+    
+    %% Zależności między warstwami
+    Interface --> Application
+    Application --> Domain
+    Infrastructure --> Domain
+    Infrastructure --> Application
+    
+    %% Implementacje zależności
+    Web --> APIRoutes
+    APIRoutes --> UseCases
+    UseCases --> AppServices
+    AppServices --> Repositories
+    AppServices --> DomainServices
+    Persistence --> Repositories
+    Implementations --> Repositories
+    
+    %% Style
+    classDef interface fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef application fill:#e6f3ff,stroke:#333,stroke-width:1px;
+    classDef domain fill:#f9f2f4,stroke:#333,stroke-width:1px;
+    classDef infrastructure fill:#f5f5f5,stroke:#333,stroke-width:1px;
+    
+    class Interface interface;
+    class Web,APIRoutes,Middleware interface;
+    
+    class Application application;
+    class UseCases,AppServices,DTOs application;
+    
+    class Domain domain;
+    class Entities,ValueObjects,Aggregates,DomainServices,DomainEvents,Repositories domain;
+    
+    class Infrastructure infrastructure;
+    class Persistence,Security,ExternalServices,Implementations infrastructure;
